@@ -1,0 +1,292 @@
+import './style.css';
+import {
+  type CarbonEntry, parseCarbon, imageDataUrl, loadImage, canvasDataUrl,
+  copyAtlasWithSlot, atlasSlotCount, buildZip, dataUrlToBytes,
+} from './carbon';
+
+const FRAME_W = 64;
+const FRAME_H = 128;
+const POSES = 15;
+const PREVIEW_SCALE = 4;
+
+type EquipmentType = 'weapon' | 'shield' | 'back' | 'helmet' | 'chest' | 'legs' | 'gloves' | 'boots' | 'neck' | 'projectile';
+type RigPreset = 'reference-held' | 'head' | 'back' | 'center';
+type SourceMode = 'single' | 'strip';
+type PartKey = 'main' | 'front' | 'back' | 'trim' | 'trimFront' | 'trimBack';
+type PartRole = 'behind' | 'front';
+
+type PartSpec = { key: PartKey; label: string; atlas: string; frames: 5 | 15; role: PartRole; optional?: boolean; specialOnly?: boolean };
+type EquipmentProfile = { label: string; logicalSheet: string; frames: 5 | 15; parts: PartSpec[]; rig: RigPreset; trimSheet?: string };
+
+const PROFILES: Record<EquipmentType, EquipmentProfile> = {
+  weapon: { label: 'Weapon / tool', logicalSheet: 'weapon1', frames: 15, rig: 'reference-held', parts: [{ key: 'main', label: 'Weapon', atlas: 'weapon1.png', frames: 15, role: 'front' }] },
+  shield: { label: 'Shield', logicalSheet: 'shield1', frames: 15, rig: 'center', trimSheet: 'shieldtrim1', parts: [
+    { key: 'back', label: 'Shield back', atlas: 'shield_back1.png', frames: 15, role: 'behind' }, { key: 'front', label: 'Shield front', atlas: 'shield_front1.png', frames: 15, role: 'front' },
+    { key: 'trimBack', label: 'Shield back trim', atlas: 'shieldtrim_back1.png', frames: 15, role: 'behind', optional: true }, { key: 'trimFront', label: 'Shield front trim', atlas: 'shieldtrim_front1.png', frames: 15, role: 'front', optional: true },
+  ] },
+  back: { label: 'Cape / back item', logicalSheet: 'back1', frames: 15, rig: 'back', parts: [{ key: 'back', label: 'Cape behind', atlas: 'cape_back1.png', frames: 15, role: 'behind' }, { key: 'front', label: 'Cape front', atlas: 'cape_front1.png', frames: 15, role: 'front' }] },
+  helmet: { label: 'Helmet', logicalSheet: 'helmet1', frames: 5, rig: 'head', trimSheet: 'helmettrim1', parts: [{ key: 'main', label: 'Helmet', atlas: 'helmet1.png', frames: 5, role: 'front' }, { key: 'trim', label: 'Helmet trim', atlas: 'helmettrim1.png', frames: 5, role: 'front', optional: true }, { key: 'back', label: 'Helmet back (item 617 only)', atlas: 'helmet_back1.png', frames: 5, role: 'behind', optional: true, specialOnly: true }] },
+  chest: { label: 'Chest armour', logicalSheet: 'chest1', frames: 15, rig: 'center', trimSheet: 'chesttrim1', parts: [{ key: 'main', label: 'Chest', atlas: 'chest1.png', frames: 15, role: 'front' }, { key: 'trim', label: 'Chest trim', atlas: 'chesttrim1.png', frames: 15, role: 'front', optional: true }] },
+  legs: { label: 'Leg armour', logicalSheet: 'legs1', frames: 15, rig: 'center', trimSheet: 'legstrim1', parts: [{ key: 'main', label: 'Leg armour', atlas: 'legs1.png', frames: 15, role: 'front' }, { key: 'trim', label: 'Leg trim', atlas: 'legstrim1.png', frames: 15, role: 'front', optional: true }] },
+  gloves: { label: 'Gloves', logicalSheet: 'gloves1', frames: 15, rig: 'center', parts: [{ key: 'main', label: 'Gloves', atlas: 'gloves1.png', frames: 15, role: 'front' }] },
+  boots: { label: 'Boots', logicalSheet: 'boots1', frames: 15, rig: 'center', parts: [{ key: 'main', label: 'Boots', atlas: 'boots1.png', frames: 15, role: 'front' }] },
+  neck: { label: 'Neck item', logicalSheet: 'neck1', frames: 5, rig: 'center', parts: [{ key: 'main', label: 'Neck', atlas: 'neck1.png', frames: 5, role: 'front' }] },
+  projectile: { label: 'Projectile (metadata only)', logicalSheet: '', frames: 15, rig: 'reference-held', parts: [] },
+};
+
+// The client names cape sheets by the direction they depict, while their draw
+// order is the opposite of those names. Keep that distinction explicit here.
+PROFILES.back.parts[0].label = 'Cape back sheet (front layer)';
+PROFILES.back.parts[0].role = 'front';
+PROFILES.back.parts[1].label = 'Cape front sheet (behind layer)';
+PROFILES.back.parts[1].role = 'behind';
+PROFILES.shield.parts[0].label = 'Shield back sheet (behind layer)';
+PROFILES.shield.parts[1].label = 'Shield front sheet (front layer)';
+
+type PoseTransform = { x: number; y: number; rotation: number; skewX: number; skewY: number; scaleX: number; scaleY: number; flipX: boolean; visible: boolean; behindReference: boolean };
+type AutoRigSettings = { preset: RigPreset; baseRotation: number; skewStrength: number; sideCompression: number; xOffset: number; yOffset: number; autoOcclusion: boolean };
+type SourcePart = { fileName: string; dataUrl: string; mode: SourceMode; anchor: { x: number; y: number }; atlasDataUrl?: string };
+type Project = {
+  version: 3;
+  item: { id: number; name: string; description: string; equipmentType: EquipmentType; equipmentSpriteSheet: string; equipmentSpriteId: number; cost: number; weight: number; tradeable: boolean; hidesSpritesUnderneath: boolean; equipmentTrimSpriteId: number; equipmentTrimSpriteSheet: string };
+  sourceParts: Partial<Record<PartKey, SourcePart>>; poses: PoseTransform[]; autoRig: AutoRigSettings; replaceExisting: boolean;
+};
+
+const REFERENCE_HELD_RIG = [
+  { x: 16, y: 68, rotation: 0, skew: 0, scale: 1, behind: false }, { x: 13, y: 68, rotation: 2.5, skew: 0, scale: 1, behind: false }, { x: 14, y: 68, rotation: 6, skew: 0, scale: 1, behind: false },
+  { x: 23, y: 67, rotation: 5.7, skew: .35, scale: .92, behind: false }, { x: 22, y: 67, rotation: 8.7, skew: .45, scale: .9, behind: false }, { x: 19, y: 68, rotation: 15.6, skew: .6, scale: .88, behind: false },
+  { x: 42, y: 65, rotation: 1.9, skew: .75, scale: .78, behind: false }, { x: 37, y: 67, rotation: 10.3, skew: .9, scale: .74, behind: false }, { x: 34, y: 67, rotation: 24.3, skew: 1, scale: .7, behind: false },
+  { x: 56, y: 80, rotation: 2.4, skew: -.75, scale: .78, behind: true }, { x: 52, y: 81, rotation: 9.7, skew: -.9, scale: .74, behind: true }, { x: 50, y: 80, rotation: 11.7, skew: -1, scale: .7, behind: true },
+  { x: 50, y: 80, rotation: 0, skew: -.2, scale: .96, behind: true }, { x: 52, y: 81, rotation: -4.7, skew: -.1, scale: .98, behind: true }, { x: 51, y: 80, rotation: -6.9, skew: 0, scale: 1, behind: true },
+] as const;
+const HEAD_RIG = [[31, 20], [30, 20], [31, 20], [31, 20], [31, 20], [31, 20], [31, 20], [31, 20], [31, 20], [32, 20], [32, 20], [32, 20], [32, 20], [32, 20], [32, 20]] as const;
+const BACK_RIG = [[32, 42], [32, 42], [32, 42], [34, 42], [34, 42], [34, 42], [35, 42], [35, 42], [35, 42], [31, 42], [31, 42], [31, 42], [32, 42], [32, 42], [32, 42]] as const;
+const DEFAULT_POSE = (): PoseTransform => ({ x: 32, y: 64, rotation: 0, skewX: 0, skewY: 0, scaleX: 1, scaleY: 1, flipX: false, visible: true, behindReference: false });
+const DEFAULT_AUTO_RIG: AutoRigSettings = { preset: 'reference-held', baseRotation: 0, skewStrength: 8, sideCompression: 30, xOffset: 0, yOffset: 0, autoOcclusion: true };
+
+const app = document.querySelector<HTMLDivElement>('#app')!;
+app.innerHTML = `<div class="studio"><header class="toolbar"><div class="brand"><strong>OpenSpell equipment workspace</strong><span>profiles, layers and client-ready strips</span></div><label class="mini">Name<input id="itemName" value="Goblin cleaver"></label><label class="mini tiny">ID<input id="itemId" type="number" value="1000"></label><label class="mini">Type<select id="equipmentType"></select></label><label class="mini tiny">Sprite<input id="spriteId" type="number" value="0"></label><label class="mini">Sheet<input id="spriteSheet" value="weapon1"></label><div class="toolbar-spacer"></div><button id="importProject">Open project</button><button class="primary" id="exportNative">Export item patch</button></header>
+<main class="main-grid"><section class="panel source-panel"><div class="panel-title"><strong>1. Upload artwork</strong><span id="status">Choose a layer and upload a PNG</span></div><div class="source-actions"><select id="partSelect"></select><label class="upload-btn">Upload PNG<input id="partFile" type="file" accept="image/png" hidden></label></div><div class="source-actions"><select id="sourceMode"><option value="single">Single rigid sprite</option><option value="strip">Finished native strip</option></select><label class="upload-btn">Load bundle (advanced)<input id="appearanceFile" type="file" accept="application/json,.json,.carbon" hidden></label></div><div class="source-actions"><select id="templateSelect"><option value="">Optional existing template</option></select><button id="loadTemplate">Load template</button></div><div class="source-preview"><canvas id="sourceCanvas" width="280" height="220"></canvas></div><div class="hint" id="sourceHint">Upload a normal 64×128 sprite, a 320×128/960×128 strip, or a full atlas such as capes.png. Full atlases are cropped using the Sprite ID above.</div><div class="marker-legend"><span><i class="marker-swatch anchor"></i> Anchor</span><span><i class="marker-swatch pivot"></i> Character pivot</span></div><div class="inline-fields compact"><label>Anchor X<input id="anchorX" type="number" value="0"></label><label>Anchor Y<input id="anchorY" type="number" value="0"></label></div><details class="metadata" open><summary>Item metadata</summary><label>Description<input id="description" value="A crude but enthusiastic cleaver."></label><div class="inline-fields compact"><label>Cost<input id="cost" type="number" value="1"></label><label>Weight<input id="weight" type="number" value="1"></label></div><label class="check"><input id="tradeable" type="checkbox" checked> Tradeable</label><label class="check"><input id="hidesSprites" type="checkbox"> Hides sprites underneath</label><label>Trim sprite ID<input id="trimSpriteId" type="number" value="-1"></label><label>Trim sheet<input id="trimSpriteSheet" value=""></label><label class="check"><input id="replaceExisting" type="checkbox"> Replace existing sprite ID</label></details><details class="metadata"><summary>Native export (optional)</summary><label class="upload-btn">Load itemdefs.carbon<input id="itemDefsFile" type="file" accept="application/json,.json,.carbon" hidden></label><div class="hint">Only native ZIP export needs the full appearance bundle. PNG authoring and strip export work without it.</div></details></section>
+<section class="panel preview-panel"><div class="panel-title"><strong>2. Layered mannequin</strong><span id="poseTitle">Pose 1 / 15</span></div><div class="canvas-wrap"><canvas id="previewCanvas" width="256" height="512"></canvas></div><div class="preview-tools"><span>Five-direction parts repeat every 3 frames</span><span>Back parts render behind the character</span><span>Drag / wheel edits rigid sources</span></div></section>
+<section class="panel rig-panel"><div class="panel-title"><strong>3. Automation</strong><span id="profileLabel">15-frame equipment</span></div><label>Rig preset<select id="rigPreset"><option value="reference-held">Held weapon / tool</option><option value="head">Helmet / head item</option><option value="back">Cape / back item</option><option value="center">Armour overlay</option></select></label><div class="inline-fields compact"><label>Base rotation<input id="baseRotation" type="number"></label><label>Skew strength<input id="skewStrength" type="number"></label></div><div class="inline-fields compact"><label>Side compression<input id="sideCompression" type="number" min="0" max="80"></label><label>Y offset<input id="autoYOffset" type="number"></label></div><div class="inline-fields compact"><label>X offset<input id="autoXOffset" type="number"></label><label class="check boxed"><input id="autoOcclusion" type="checkbox" checked> Auto front/back</label></div><button class="primary full" id="autoGenerate">Generate rigid poses</button><div class="hint">Armour parts should be authored as directional strips. Rigid automation remains available for held items and quick prototypes.</div><div class="divider"></div><div class="panel-title small-title"><strong>Current pose override</strong><span>main source transform</span></div><div class="inline-fields compact triple"><label>X<input id="poseX" type="number"></label><label>Y<input id="poseY" type="number"></label><label>Rotation<input id="rotation" type="number" step="0.5"></label></div><div class="inline-fields compact triple"><label>Skew X<input id="skewX" type="number" step="0.5"></label><label>Scale X<input id="scaleX" type="number" step="0.01"></label><label>Scale Y<input id="scaleY" type="number" step="0.01"></label></div><div class="pose-flags"><label class="check"><input id="flipX" type="checkbox"> Flip X</label><label class="check"><input id="visible" type="checkbox" checked> Visible</label><label class="check"><input id="behind" type="checkbox"> Behind body</label></div><div class="pose-actions"><button id="prevPose">←</button><button id="copyPrev">Copy prev</button><button id="resetPose">Reset</button><button id="nextPose">→</button></div></section><section class="poses-panel"><div class="pose-grid" id="poseGrid"></div></section></main><footer class="exportbar"><span><strong>Output:</strong> profile-aware strips plus a complete native <code>appearance.carbon</code> ZIP.</span><div class="footer-actions"><button id="exportItemDef">Itemdef JSON</button><button id="exportProject">Project v3 JSON</button><button id="exportStrip">Export part strip</button><button class="primary" id="exportNative2">Export native ZIP</button></div></footer><input id="projectFile" type="file" accept="application/json,.json" hidden></div>`;
+
+const el = <T extends HTMLElement>(id: string) => document.querySelector<T>(`#${id}`)!;
+const preview = el<HTMLCanvasElement>('previewCanvas'); const pctx = preview.getContext('2d')!; const sourceCanvas = el<HTMLCanvasElement>('sourceCanvas'); const sctx = sourceCanvas.getContext('2d')!; const poseGrid = el<HTMLDivElement>('poseGrid'); const status = el<HTMLSpanElement>('status'); const equipmentType = el<HTMLSelectElement>('equipmentType');
+const sourceParts: Partial<Record<PartKey, SourcePart>> = {}; const sourceImageCache = new Map<PartKey, HTMLImageElement>();
+let currentPose = 0; let selectedPart: PartKey = 'main'; let poses = Array.from({ length: POSES }, DEFAULT_POSE); let referenceImage: HTMLImageElement | null = null; let importedAppearance: CarbonEntry[] | null = null; let importedDefs: any[] = []; let templateDef: any | null = null; let dragStart: { clientX: number; clientY: number; x: number; y: number } | null = null;
+
+function profile(): EquipmentProfile { return PROFILES[equipmentType.value as EquipmentType]; }
+function currentItemId(): number { return Number(el<HTMLInputElement>('itemId').value) || 0; }
+function partSpec(key = selectedPart): PartSpec | undefined { return profile().parts.find(p => p.key === key); }
+function getPartSource(key = selectedPart): SourcePart { return sourceParts[key] ?? { fileName: '', dataUrl: '', mode: 'strip', anchor: { x: 0, y: 0 } }; }
+function setPartSource(key: PartKey, value: SourcePart) { sourceParts[key] = value; }
+function frameForPose(frames: number, pose: number): number { return frames === 5 ? Math.floor(pose / 3) : pose; }
+function makePartOptions() { const select = el<HTMLSelectElement>('partSelect'); const old = selectedPart; select.innerHTML = ''; for (const part of profile().parts) { if (part.specialOnly && currentItemId() !== 617) continue; const option = document.createElement('option'); option.value = part.key; option.textContent = part.label; select.appendChild(option); } selectedPart = profile().parts.some(p => p.key === old && (!p.specialOnly || currentItemId() === 617)) ? old : (select.value as PartKey || 'main'); select.value = selectedPart; el<HTMLSpanElement>('profileLabel').textContent = `${profile().frames} frames · ${profile().parts.length} layer${profile().parts.length === 1 ? '' : 's'}`; el<HTMLInputElement>('spriteSheet').value = profile().logicalSheet; el<HTMLSelectElement>('rigPreset').value = profile().rig; el<HTMLSpanElement>('sourceHint').textContent = profile().parts.length ? `Use ${profile().frames === 5 ? '320×128 (five directions)' : '960×128 (15 animation frames)'} for this part. Paired front/back and trim sheets are authored separately.` : 'Projectile equipment has no appearance atlas; export its metadata only.'; }
+
+function readAutoSettings(): AutoRigSettings { return { preset: el<HTMLSelectElement>('rigPreset').value as RigPreset, baseRotation: Number(el<HTMLInputElement>('baseRotation').value) || 0, skewStrength: Number(el<HTMLInputElement>('skewStrength').value) || 0, sideCompression: Number(el<HTMLInputElement>('sideCompression').value) || 0, xOffset: Number(el<HTMLInputElement>('autoXOffset').value) || 0, yOffset: Number(el<HTMLInputElement>('autoYOffset').value) || 0, autoOcclusion: el<HTMLInputElement>('autoOcclusion').checked }; }
+function syncAutoSettings(s: AutoRigSettings) { el<HTMLSelectElement>('rigPreset').value = s.preset; el<HTMLInputElement>('baseRotation').value = String(s.baseRotation); el<HTMLInputElement>('skewStrength').value = String(s.skewStrength); el<HTMLInputElement>('sideCompression').value = String(s.sideCompression); el<HTMLInputElement>('autoXOffset').value = String(s.xOffset); el<HTMLInputElement>('autoYOffset').value = String(s.yOffset); el<HTMLInputElement>('autoOcclusion').checked = s.autoOcclusion; }
+function applyTransform(ctx: CanvasRenderingContext2D, t: PoseTransform) { ctx.translate(t.x, t.y); ctx.rotate(t.rotation * Math.PI / 180); ctx.transform(1, Math.tan(t.skewY * Math.PI / 180), Math.tan(t.skewX * Math.PI / 180), 1, 0, 0); ctx.scale((t.flipX ? -1 : 1) * t.scaleX, t.scaleY); }
+async function loadDataUrl(file: File): Promise<string> { return await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); }); }
+async function extractAtlasStrip(atlasDataUrl: string, spec: PartSpec, spriteId: number): Promise<{ dataUrl: string; image: HTMLImageElement }> {
+  const atlas = await loadImage(atlasDataUrl);
+  const cols = Math.floor(atlas.width / FRAME_W);
+  const rows = Math.floor(atlas.height / FRAME_H);
+  const cell = Math.max(0, spriteId) * spec.frames;
+  if (cols < spec.frames || rows < 1 || cell >= cols * rows) throw new Error(`Sprite ID ${spriteId} is outside this atlas.`);
+  const canvas = document.createElement('canvas'); canvas.width = spec.frames * FRAME_W; canvas.height = FRAME_H;
+  const ctx = canvas.getContext('2d')!; ctx.imageSmoothingEnabled = false;
+  for (let frame = 0; frame < spec.frames; frame++) {
+    const absolute = cell + frame;
+    ctx.drawImage(atlas, (absolute % cols) * FRAME_W, Math.floor(absolute / cols) * FRAME_H, FRAME_W, FRAME_H, frame * FRAME_W, 0, FRAME_W, FRAME_H);
+  }
+  const dataUrl = canvasDataUrl(canvas);
+  return { dataUrl, image: await loadImage(dataUrl) };
+}
+
+function drawPart(ctx: CanvasRenderingContext2D, key: PartKey, pose: number) { const spec = partSpec(key); const source = sourceParts[key]; const image = sourceImageCache.get(key); if (!spec || !source?.dataUrl || !image || !poses[pose].visible) return; const frame = frameForPose(spec.frames, pose); ctx.save(); ctx.imageSmoothingEnabled = false; if (source.mode === 'strip' && image.width === spec.frames * FRAME_W && image.height === FRAME_H) ctx.drawImage(image, frame * FRAME_W, 0, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H); else if (source.mode === 'single') { applyTransform(ctx, poses[pose]); ctx.drawImage(image, -source.anchor.x, -source.anchor.y); } ctx.restore(); }
+function drawReference(ctx: CanvasRenderingContext2D, pose: number, opacity = .58) { if (!referenceImage) return; ctx.save(); ctx.globalAlpha = opacity; ctx.imageSmoothingEnabled = false; ctx.drawImage(referenceImage, pose * FRAME_W, 0, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H); ctx.restore(); }
+function renderPose(ctx: CanvasRenderingContext2D, pose: number, includeReference: boolean) { ctx.clearRect(0, 0, FRAME_W, FRAME_H); ctx.imageSmoothingEnabled = false; const before = profile().parts.filter(p => p.role === 'behind' || poses[pose].behindReference); const after = profile().parts.filter(p => p.role === 'front' && !poses[pose].behindReference); for (const part of before) drawPart(ctx, part.key, pose); if (includeReference) drawReference(ctx, pose); for (const part of after) drawPart(ctx, part.key, pose); }
+function drawMarker(ctx: CanvasRenderingContext2D, x: number, y: number, label: string, color: string, size: number) { ctx.save(); ctx.strokeStyle = '#111'; ctx.fillStyle = color; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, y, size + 1.5, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI * 2); ctx.stroke(); ctx.font = `700 ${Math.max(4, size * 1.8)}px system-ui`; ctx.fillText(label, x + size + 3, y - size - 2); ctx.restore(); }
+function renderPreview() { pctx.clearRect(0, 0, preview.width, preview.height); pctx.save(); pctx.scale(PREVIEW_SCALE, PREVIEW_SCALE); renderPose(pctx, currentPose, true); if (sourceParts.main?.mode === 'single') drawMarker(pctx, poses[currentPose].x, poses[currentPose].y, 'PIVOT', '#6de7ff', 2.5); pctx.restore(); }
+const thumbs: HTMLCanvasElement[] = []; for (let i = 0; i < POSES; i++) { const box = document.createElement('button'); box.className = 'pose'; box.innerHTML = `<canvas width="64" height="128"></canvas><span>${i + 1}</span>`; const canvas = box.querySelector('canvas')!; thumbs.push(canvas); box.addEventListener('click', () => { currentPose = i; syncControlsFromPose(); renderAll(); }); poseGrid.appendChild(box); }
+function renderThumbs() { thumbs.forEach((canvas, i) => { renderPose(canvas.getContext('2d')!, i, true); canvas.parentElement!.classList.toggle('active', i === currentPose); }); }
+function renderSourcePreview() { sctx.clearRect(0, 0, sourceCanvas.width, sourceCanvas.height); const src = sourceParts[selectedPart]; const image = sourceImageCache.get(selectedPart); if (!src?.dataUrl || !image) { sctx.fillStyle = '#777'; sctx.font = '12px system-ui'; sctx.textAlign = 'center'; sctx.fillText('Upload a part PNG', sourceCanvas.width / 2, sourceCanvas.height / 2); return; } const scale = Math.min((sourceCanvas.width - 18) / image.width, (sourceCanvas.height - 18) / image.height, 10); const w = image.width * scale, h = image.height * scale, x = (sourceCanvas.width - w) / 2, y = (sourceCanvas.height - h) / 2; sctx.imageSmoothingEnabled = false; sctx.drawImage(image, x, y, w, h); if (src.mode === 'single') drawMarker(sctx, x + src.anchor.x * scale, y + src.anchor.y * scale, 'ANCHOR', '#ffcf5a', Math.max(4, scale)); (sourceCanvas as any).__drawMeta = { scale, x, y }; }
+function renderAll() { renderPreview(); renderThumbs(); renderSourcePreview(); el<HTMLSpanElement>('poseTitle').textContent = `Pose ${currentPose + 1} / ${POSES}`; }
+
+function buildHeldRig(s: AutoRigSettings): PoseTransform[] { const compression = Math.min(.8, Math.max(0, s.sideCompression / 100)); return REFERENCE_HELD_RIG.map(r => ({ x: r.x + s.xOffset, y: r.y + s.yOffset, rotation: r.rotation + s.baseRotation, skewX: r.skew * s.skewStrength, skewY: 0, scaleX: Math.max(.2, 1 - ((1 - r.scale) / .3) * compression), scaleY: 1, flipX: false, visible: true, behindReference: s.autoOcclusion ? r.behind : false })); }
+function buildSimpleRig(s: AutoRigSettings, anchors: readonly (readonly [number, number])[], behind: boolean): PoseTransform[] { const skew = [0, 0, 0, .35, .45, .6, .75, .9, 1, -.75, -.9, -1, -.2, -.1, 0]; const scale = [1, 1, 1, .93, .91, .89, .78, .74, .7, .78, .74, .7, .96, .98, 1]; const compression = Math.min(.8, Math.max(0, s.sideCompression / 100)); return anchors.map(([x, y], i) => ({ x: x + s.xOffset, y: y + s.yOffset, rotation: s.baseRotation, skewX: skew[i] * s.skewStrength, skewY: 0, scaleX: 1 - ((1 - scale[i]) / .3) * compression, scaleY: 1, flipX: false, visible: true, behindReference: s.autoOcclusion ? behind : false })); }
+function syncControlsFromPose() { const t = poses[currentPose]; for (const [id, value] of [['poseX', t.x], ['poseY', t.y], ['rotation', t.rotation], ['skewX', t.skewX], ['scaleX', t.scaleX], ['scaleY', t.scaleY]] as const) el<HTMLInputElement>(id).value = String(value); el<HTMLInputElement>('flipX').checked = t.flipX; el<HTMLInputElement>('visible').checked = t.visible; el<HTMLInputElement>('behind').checked = t.behindReference; }
+function syncPoseFromControls() { const t = poses[currentPose]; t.x = Number(el<HTMLInputElement>('poseX').value); t.y = Number(el<HTMLInputElement>('poseY').value); t.rotation = Number(el<HTMLInputElement>('rotation').value); t.skewX = Number(el<HTMLInputElement>('skewX').value); t.scaleX = Number(el<HTMLInputElement>('scaleX').value); t.scaleY = Number(el<HTMLInputElement>('scaleY').value); t.flipX = el<HTMLInputElement>('flipX').checked; t.visible = el<HTMLInputElement>('visible').checked; t.behindReference = el<HTMLInputElement>('behind').checked; renderAll(); }
+function applyAutoRig(announce = true) { const s = readAutoSettings(); poses = s.preset === 'reference-held' ? buildHeldRig(s) : s.preset === 'head' ? buildSimpleRig(s, HEAD_RIG, false) : s.preset === 'back' ? buildSimpleRig(s, BACK_RIG, true) : buildSimpleRig(s, Array.from({ length: POSES }, () => [32, 62] as const), false); currentPose = 0; syncControlsFromPose(); renderAll(); if (announce) { const rigid = Object.values(sourceParts).some(source => source?.mode === 'single'); status.textContent = rigid ? `Generated ${profile().frames} poses for ${s.preset}; preview reset to pose 1.` : `Generated ${profile().frames} pose transforms; authored strips keep their own frames.`; } }
+
+async function setPartFile(file: File) { const spec = partSpec(); if (!spec) return; const dataUrl = await loadDataUrl(file); const image = await loadImage(dataUrl); const validStrip = image.width === spec.frames * FRAME_W && image.height === FRAME_H; const validSingle = image.width === FRAME_W && image.height === FRAME_H; const isAtlas = image.width % FRAME_W === 0 && image.height % FRAME_H === 0 && (image.width > spec.frames * FRAME_W || image.height > FRAME_H); try { if (isAtlas) { const extracted = await extractAtlasStrip(dataUrl, spec, Number(el<HTMLInputElement>('spriteId').value) || 0); setPartSource(selectedPart, { fileName: `${file.name} · sprite ${el<HTMLInputElement>('spriteId').value || 0}`, dataUrl: extracted.dataUrl, atlasDataUrl: dataUrl, mode: 'strip', anchor: { x: 0, y: 0 } }); sourceImageCache.set(selectedPart, extracted.image); el<HTMLSelectElement>('sourceMode').value = 'strip'; status.textContent = `${file.name} atlas loaded as ${spec.label}.`; } else { const mode: SourceMode = validStrip ? 'strip' : 'single'; setPartSource(selectedPart, { fileName: file.name, dataUrl, mode, anchor: { x: Math.floor(image.width / 2), y: Math.max(0, image.height - 3) } }); sourceImageCache.set(selectedPart, image); el<HTMLSelectElement>('sourceMode').value = mode; status.textContent = validStrip || validSingle ? `${file.name} · ${image.width}×${image.height}` : `Expected ${spec.frames * FRAME_W}×128 strip, 64×128 sprite, or a full atlas; got ${image.width}×${image.height}.`; } } catch (error) { status.textContent = error instanceof Error ? error.message : 'Unable to read this atlas.'; } syncAnchorInputs(); renderAll(); }
+function syncAnchorInputs() { const src = getPartSource(); el<HTMLInputElement>('anchorX').value = String(src.anchor.x); el<HTMLInputElement>('anchorY').value = String(src.anchor.y); }
+async function refreshAtlasSources() { const spriteId = Number(el<HTMLInputElement>('spriteId').value) || 0; for (const [key, source] of Object.entries(sourceParts)) { const spec = profile().parts.find(part => part.key === key); if (!source?.atlasDataUrl || !spec) continue; try { const extracted = await extractAtlasStrip(source.atlasDataUrl, spec, spriteId); source.dataUrl = extracted.dataUrl; source.fileName = `${source.fileName.split(' · sprite ')[0]} · sprite ${spriteId}`; sourceImageCache.set(key as PartKey, extracted.image); } catch (error) { status.textContent = error instanceof Error ? error.message : 'Unable to extract that sprite ID.'; } } renderAll(); }
+async function importAppearance(file: File) { try { const parsed = parseCarbon(await file.text()); if (!Array.isArray(parsed)) throw new Error('appearance.carbon must be an array'); importedAppearance = parsed as CarbonEntry[]; status.textContent = `Imported ${importedAppearance.length} appearance atlases.`; refreshTemplateOptions(); } catch (error) { status.textContent = error instanceof Error ? error.message : 'Invalid appearance bundle.'; } }
+async function importDefs(file: File) { try { const parsed = parseCarbon(await file.text()); if (!Array.isArray(parsed)) throw new Error('itemdefs.carbon must be an array'); importedDefs = parsed; refreshTemplateOptions(); status.textContent = `Imported ${importedDefs.length} item definitions.`; } catch (error) { status.textContent = error instanceof Error ? error.message : 'Invalid item definitions.'; } }
+function refreshTemplateOptions() { const select = el<HTMLSelectElement>('templateSelect'); select.innerHTML = ''; const empty = document.createElement('option'); empty.value = ''; empty.textContent = importedDefs.length ? 'Choose existing item template' : 'Import itemdefs.carbon first'; select.appendChild(empty); for (const def of importedDefs.filter(d => d.equipmentType === equipmentType.value)) { const option = document.createElement('option'); option.value = String(def._id); option.textContent = `${def._id} · ${def.name}`; select.appendChild(option); } }
+async function loadProjectAssetFiles(files: File[]) {
+  const appearance = files.find(file => file.name.toLowerCase() === 'appearance.carbon');
+  const defs = files.find(file => file.name.toLowerCase() === 'itemdefs.carbon');
+  if (!appearance && !defs) { status.textContent = 'No appearance.carbon or itemdefs.carbon found; authoring can continue without them.'; return; }
+  if (appearance) await importAppearance(appearance);
+  if (defs) await importDefs(defs);
+  status.textContent = `Project connected${appearance ? ' · appearance loaded' : ''}${defs ? ' · itemdefs loaded' : ''}.`;
+}
+async function openOpenSpellProject() {
+  try {
+    const picker = (window as Window & { showDirectoryPicker?: () => Promise<any> }).showDirectoryPicker;
+    if (picker) {
+      const root = await picker();
+      const files: File[] = [];
+      async function visit(directory: any): Promise<void> {
+        for await (const [name, entry] of directory.entries()) {
+          if (entry.kind === 'file') {
+            const lower = String(name).toLowerCase();
+            if (lower === 'appearance.carbon' || lower === 'itemdefs.carbon') files.push(await entry.getFile());
+          } else if (entry.kind === 'directory') await visit(entry);
+        }
+      }
+      await visit(root);
+      await loadProjectAssetFiles(files);
+      return;
+    }
+    el<HTMLInputElement>('projectFolder').click();
+  } catch (error) {
+    if ((error as DOMException)?.name !== 'AbortError') status.textContent = error instanceof Error ? error.message : 'Unable to open that project folder.';
+  }
+}
+function entryByName(name: string): CarbonEntry | undefined { return importedAppearance?.find(entry => entry.filename === name); }
+function applyDefinition(def: any) { if (def.equipmentType && PROFILES[def.equipmentType as EquipmentType]) equipmentType.value = def.equipmentType; el<HTMLInputElement>('itemId').value = String(def._id ?? 0); el<HTMLInputElement>('itemName').value = def.name ?? ''; el<HTMLInputElement>('description').value = def.description ?? ''; el<HTMLInputElement>('spriteId').value = String(def.equipmentSpriteId ?? 0); el<HTMLInputElement>('spriteSheet').value = def.equipmentSpriteSheet ?? profile().logicalSheet; el<HTMLInputElement>('cost').value = String(def.cost ?? 0); el<HTMLInputElement>('weight').value = String(def.weight ?? 0); el<HTMLInputElement>('tradeable').checked = def.isTradeable !== false; el<HTMLInputElement>('hidesSprites').checked = !!def.hidesSpritesUnderneath; el<HTMLInputElement>('trimSpriteId').value = String(def.equipmentTrimSpriteId ?? -1); el<HTMLInputElement>('trimSpriteSheet').value = def.equipmentTrimSpriteSheet ?? ''; makePartOptions(); }
+async function loadTemplate() { const id = Number(el<HTMLSelectElement>('templateSelect').value); const def = importedDefs.find(item => item._id === id); if (!def || !importedAppearance) { status.textContent = 'Import appearance and itemdefs bundles, then choose a template.'; return; } templateDef = def; applyDefinition(def); for (const spec of profile().parts) { if (spec.specialOnly && id !== 617) continue; const entry = entryByName(spec.atlas); if (!entry) continue; const image = await loadImage(imageDataUrl(entry)); const frames = spec.frames; const sprite = spec.specialOnly ? 0 : (spec.key.startsWith('trim') ? Number(def.equipmentTrimSpriteId ?? def.equipmentSpriteId) : Number(def.equipmentSpriteId)) || 0; const cells = sprite * frames; const cols = Math.floor(image.width / FRAME_W); const x = (cells % cols) * FRAME_W; const y = Math.floor(cells / cols) * FRAME_H; const strip = document.createElement('canvas'); strip.width = frames * FRAME_W; strip.height = FRAME_H; strip.getContext('2d')!.drawImage(image, x, y, frames * FRAME_W, FRAME_H, 0, 0, frames * FRAME_W, FRAME_H); const dataUrl = canvasDataUrl(strip); sourceParts[spec.key] = { fileName: `${spec.atlas}#${sprite}`, dataUrl, mode: 'strip', anchor: { x: 0, y: 0 } }; sourceImageCache.set(spec.key, await loadImage(dataUrl)); } status.textContent = `Loaded ${def.name} as a layered template.`; makePartOptions(); renderAll(); }
+
+function readProject(): Project { const p = profile(); return { version: 3, item: { id: currentItemId(), name: el<HTMLInputElement>('itemName').value, description: el<HTMLInputElement>('description').value, equipmentType: equipmentType.value as EquipmentType, equipmentSpriteSheet: p.logicalSheet, equipmentSpriteId: Number(el<HTMLInputElement>('spriteId').value) || 0, cost: Number(el<HTMLInputElement>('cost').value) || 0, weight: Number(el<HTMLInputElement>('weight').value) || 0, tradeable: el<HTMLInputElement>('tradeable').checked, hidesSpritesUnderneath: el<HTMLInputElement>('hidesSprites').checked, equipmentTrimSpriteId: Number(el<HTMLInputElement>('trimSpriteId').value), equipmentTrimSpriteSheet: el<HTMLInputElement>('trimSpriteSheet').value }, sourceParts: structuredClone(sourceParts), poses: structuredClone(poses), autoRig: readAutoSettings(), replaceExisting: el<HTMLInputElement>('replaceExisting').checked }; }
+function itemDefinition(p: Project, spriteId = p.item.equipmentSpriteId): any { const base = templateDef ? structuredClone(templateDef) : {}; return { ...base, _id: p.item.id, name: p.item.name, description: p.item.description, isNamePlural: base.isNamePlural ?? false, cost: p.item.cost, isStackable: base.isStackable ?? false, isTradeable: p.item.tradeable, isForMission: base.isForMission ?? false, isMembers: base.isMembers ?? false, canIOU: base.canIOU ?? true, inventoryActions: base.inventoryActions ?? ['equip'], edibleEffects: base.edibleEffects ?? null, edibleResult: base.edibleResult ?? null, equippableEffects: base.equippableEffects ?? [], equippableRequirements: base.equippableRequirements ?? [], equipmentType: p.item.equipmentType, equipmentSpriteId: spriteId, equipmentSpriteSheet: p.item.equipmentSpriteSheet || null, equipmentTrimSpriteId: p.item.equipmentTrimSpriteId >= 0 ? p.item.equipmentTrimSpriteId : undefined, equipmentTrimSpriteSheet: p.item.equipmentTrimSpriteSheet || undefined, hidesSpritesUnderneath: p.item.hidesSpritesUnderneath, removeEquipmentOnEquip: base.removeEquipmentOnEquip ?? [], weight: p.item.weight, weaponSpeed: p.item.equipmentType === 'weapon' ? (base.weaponSpeed ?? 4) : base.weaponSpeed, hasUniqueData: base.hasUniqueData ?? false }; }
+
+async function partStrip(key: PartKey): Promise<HTMLCanvasElement | null> { const spec = partSpec(key); const src = sourceParts[key]; if (!spec || !src?.dataUrl) return null; const image = sourceImageCache.get(key) ?? await loadImage(src.dataUrl); sourceImageCache.set(key, image); if (src.mode === 'strip') { if (image.width !== spec.frames * FRAME_W || image.height !== FRAME_H) return null; const canvas = document.createElement('canvas'); canvas.width = spec.frames * FRAME_W; canvas.height = FRAME_H; canvas.getContext('2d')!.drawImage(image, 0, 0, canvas.width, canvas.height); return canvas; } if (src.mode !== 'single') return null; const canvas = document.createElement('canvas'); canvas.width = spec.frames * FRAME_W; canvas.height = FRAME_H; const ctx = canvas.getContext('2d')!; for (let i = 0; i < spec.frames; i++) { const pose = spec.frames === 5 ? i * 3 : i; ctx.save(); ctx.translate(i * FRAME_W, 0); applyTransform(ctx, poses[pose]); ctx.imageSmoothingEnabled = false; ctx.drawImage(image, -src.anchor.x, -src.anchor.y); ctx.restore(); } return canvas; }
+async function nextSpriteId(p: EquipmentProfile): Promise<number> { let next = 0; for (const spec of p.parts) { const entry = entryByName(spec.atlas); if (entry) next = Math.max(next, atlasSlotCount(await loadImage(imageDataUrl(entry)), spec.frames)); } for (const def of importedDefs) if (def.equipmentSpriteSheet === p.logicalSheet && Number.isFinite(def.equipmentSpriteId)) next = Math.max(next, Number(def.equipmentSpriteId) + 1); return next; }
+async function exportNative() { if (!importedAppearance) { status.textContent = 'Import appearance.carbon before exporting a native bundle.'; return; } const p = readProject(); const prof = profile(); const spriteId = p.replaceExisting ? p.item.equipmentSpriteId : await nextSpriteId(prof); const hasTrim = prof.parts.some(spec => spec.key.startsWith('trim') && sourceParts[spec.key]?.dataUrl); if (hasTrim && prof.trimSheet && !p.item.equipmentTrimSpriteSheet) p.item.equipmentTrimSpriteSheet = prof.trimSheet; if (hasTrim && p.item.equipmentTrimSpriteId < 0) p.item.equipmentTrimSpriteId = spriteId; const entries = importedAppearance.map(entry => ({ ...entry })); for (const spec of prof.parts) { const strip = await partStrip(spec.key); if (!strip) { if (spec.optional || spec.specialOnly || p.item.equipmentType === 'projectile') continue; status.textContent = `Missing required ${spec.label} source.`; return; } const entry = entries.find(item => item.filename === spec.atlas); if (!entry) { status.textContent = `appearance.carbon is missing ${spec.atlas}.`; return; } if (spec.specialOnly) { entry.data = canvasDataUrl(strip); continue; } const base = await loadImage(imageDataUrl(entry)); const updated = copyAtlasWithSlot(base, await loadImage(canvasDataUrl(strip)), spec.frames, spriteId); entry.data = canvasDataUrl(updated); } const def = itemDefinition(p, spriteId); const instructions = `OpenSpell custom asset install\n\nCopy carbon/appearance.carbon and carbon/itemdefs.carbon into apps/shared-assets/custom/static/.\nThe appearance bundle is complete because the asset overlay replaces binary carbon bundles as a whole.\n\nEquipment profile: ${prof.label}\nSprite ID: ${spriteId}\nFrames per item: ${prof.frames}\n`; const zip = buildZip([{ name: 'carbon/appearance.carbon', data: JSON.stringify(entries) }, { name: 'carbon/itemdefs.carbon', data: JSON.stringify([def], null, 2) }, { name: 'README.txt', data: instructions }]); downloadBlob(zip, `${slugify(p.item.name)}-openspell-assets.zip`); status.textContent = `Native bundle exported with sprite ID ${spriteId}.`; }
+function exportPartStrip() { void (async () => { const strip = await partStrip(selectedPart); if (!strip) { status.textContent = 'Upload or load the selected part first.'; return; } strip.toBlob(blob => { if (blob) downloadBlob(blob, `${slugify(el<HTMLInputElement>('itemName').value)}-${selectedPart}-${profile().frames}f.png`); }, 'image/png'); })(); }
+function exportItemDef() { const p = readProject(); downloadBlob(new Blob([JSON.stringify(itemDefinition(p), null, 2)], { type: 'application/json' }), `${slugify(p.item.name)}-itemdef.json`); }
+function exportProject() { const p = readProject(); downloadBlob(new Blob([JSON.stringify({ ...p, templateId: templateDef?._id ?? null }, null, 2)], { type: 'application/json' }), `${slugify(p.item.name)}-project-v3.json`); }
+function downloadBlob(blob: Blob, filename: string) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+function slugify(value: string) { return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'item'; }
+
+async function loadProject(file: File) { try { const raw = JSON.parse(await file.text()) as Partial<Project> & { version?: number; sourceMode?: SourceMode; sourceAnchor?: { x: number; y: number } }; if (!raw.item) throw new Error('Invalid project: missing item metadata.'); applyDefinition(raw.item); if (raw.sourceParts) { for (const [key, source] of Object.entries(raw.sourceParts)) { if (source?.dataUrl) { sourceParts[key as PartKey] = source; sourceImageCache.set(key as PartKey, await loadImage(source.dataUrl)); } } } else if (raw.sourceMode && raw.sourceAnchor) { sourceParts.main = { fileName: '', dataUrl: '', mode: raw.sourceMode, anchor: raw.sourceAnchor }; } poses = (raw.poses ?? []).map(p => ({ ...DEFAULT_POSE(), ...p })); while (poses.length < POSES) poses.push(DEFAULT_POSE()); syncAutoSettings(raw.autoRig ?? DEFAULT_AUTO_RIG); el<HTMLInputElement>('replaceExisting').checked = raw.replaceExisting ?? false; makePartOptions(); syncAnchorInputs(); syncControlsFromPose(); renderAll(); status.textContent = Number(raw.version) === 2 ? 'Legacy v2 project migrated to v3; re-select its source PNG.' : 'Project loaded.'; } catch (error) { status.textContent = error instanceof Error ? error.message : 'Unable to load project.'; } }
+
+equipmentType.addEventListener('change', () => { makePartOptions(); refreshTemplateOptions(); applyAutoRig(false); renderAll(); }); el<HTMLSelectElement>('partSelect').addEventListener('change', e => { selectedPart = (e.target as HTMLSelectElement).value as PartKey; el<HTMLSelectElement>('sourceMode').value = getPartSource().mode; syncAnchorInputs(); renderAll(); }); el<HTMLInputElement>('partFile').addEventListener('change', e => { const file = (e.target as HTMLInputElement).files?.[0]; if (file) void setPartFile(file); }); el<HTMLInputElement>('appearanceFile').addEventListener('change', e => { const file = (e.target as HTMLInputElement).files?.[0]; if (file) void importAppearance(file); }); el<HTMLInputElement>('itemDefsFile').addEventListener('change', e => { const file = (e.target as HTMLInputElement).files?.[0]; if (file) void importDefs(file); }); el<HTMLButtonElement>('loadTemplate').addEventListener('click', () => void loadTemplate()); el<HTMLSelectElement>('sourceMode').addEventListener('change', e => { const src = getPartSource(); src.mode = (e.target as HTMLSelectElement).value as SourceMode; setPartSource(selectedPart, src); renderAll(); }); ['anchorX', 'anchorY'].forEach(id => el<HTMLInputElement>(id).addEventListener('input', () => { const src = getPartSource(); src.anchor.x = Number(el<HTMLInputElement>('anchorX').value); src.anchor.y = Number(el<HTMLInputElement>('anchorY').value); setPartSource(selectedPart, src); renderAll(); })); el<HTMLButtonElement>('autoGenerate').addEventListener('click', () => applyAutoRig(true));
+for (const id of ['poseX', 'poseY', 'rotation', 'skewX', 'scaleX', 'scaleY', 'flipX', 'visible', 'behind']) { el<HTMLInputElement>(id).addEventListener('input', syncPoseFromControls); el<HTMLInputElement>(id).addEventListener('change', syncPoseFromControls); } el<HTMLButtonElement>('prevPose').addEventListener('click', () => { currentPose = (currentPose + POSES - 1) % POSES; syncControlsFromPose(); renderAll(); }); el<HTMLButtonElement>('nextPose').addEventListener('click', () => { currentPose = (currentPose + 1) % POSES; syncControlsFromPose(); renderAll(); }); el<HTMLButtonElement>('copyPrev').addEventListener('click', () => { poses[currentPose] = structuredClone(poses[(currentPose + POSES - 1) % POSES]); syncControlsFromPose(); renderAll(); }); el<HTMLButtonElement>('resetPose').addEventListener('click', () => { poses[currentPose] = DEFAULT_POSE(); syncControlsFromPose(); renderAll(); });
+el<HTMLButtonElement>('exportNative').addEventListener('click', () => void exportNative()); el<HTMLButtonElement>('exportNative2').addEventListener('click', () => void exportNative()); el<HTMLButtonElement>('exportStrip').addEventListener('click', exportPartStrip); el<HTMLButtonElement>('exportItemDef').addEventListener('click', exportItemDef); el<HTMLButtonElement>('exportProject').addEventListener('click', exportProject); el<HTMLButtonElement>('importProject').addEventListener('click', () => el<HTMLInputElement>('projectFile').click()); el<HTMLInputElement>('projectFile').addEventListener('change', e => { const file = (e.target as HTMLInputElement).files?.[0]; if (file) void loadProject(file); });
+sourceCanvas.addEventListener('click', e => { const src = getPartSource(); const image = sourceImageCache.get(selectedPart); const meta = (sourceCanvas as any).__drawMeta; if (!image || src.mode !== 'single' || !meta) return; const rect = sourceCanvas.getBoundingClientRect(); const x = (e.clientX - rect.left) * sourceCanvas.width / rect.width, y = (e.clientY - rect.top) * sourceCanvas.height / rect.height; src.anchor = { x: Math.round((x - meta.x) / meta.scale), y: Math.round((y - meta.y) / meta.scale) }; setPartSource(selectedPart, src); syncAnchorInputs(); renderAll(); });
+preview.addEventListener('pointerdown', e => { const src = sourceParts.main; if (!src || src.mode !== 'single') return; preview.setPointerCapture(e.pointerId); dragStart = { clientX: e.clientX, clientY: e.clientY, x: poses[currentPose].x, y: poses[currentPose].y }; preview.classList.add('dragging'); }); preview.addEventListener('pointermove', e => { if (!dragStart) return; const rect = preview.getBoundingClientRect(); poses[currentPose].x = dragStart.x + (e.clientX - dragStart.clientX) * FRAME_W / rect.width; poses[currentPose].y = dragStart.y + (e.clientY - dragStart.clientY) * FRAME_H / rect.height; syncControlsFromPose(); renderAll(); }); const stopDrag = () => { dragStart = null; preview.classList.remove('dragging'); }; preview.addEventListener('pointerup', stopDrag); preview.addEventListener('pointercancel', stopDrag); preview.addEventListener('wheel', e => { if (!sourceParts.main || sourceParts.main.mode !== 'single') return; e.preventDefault(); if (e.shiftKey) poses[currentPose].skewX += e.deltaY > 0 ? 1 : -1; else poses[currentPose].rotation += e.deltaY > 0 ? 1 : -1; syncControlsFromPose(); renderAll(); }, { passive: false });
+window.addEventListener('keydown', e => { if (['INPUT', 'SELECT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return; const t = poses[currentPose]; const step = e.shiftKey ? 5 : 1; if (e.key === 'ArrowLeft') t.x -= step; else if (e.key === 'ArrowRight') t.x += step; else if (e.key === 'ArrowUp') t.y -= step; else if (e.key === 'ArrowDown') t.y += step; else return; e.preventDefault(); syncControlsFromPose(); renderAll(); });
+async function init() { (Object.keys(PROFILES) as EquipmentType[]).forEach(type => { const option = document.createElement('option'); option.value = type; option.textContent = PROFILES[type].label; equipmentType.appendChild(option); }); equipmentType.value = 'weapon'; syncAutoSettings(DEFAULT_AUTO_RIG); makePartOptions(); syncControlsFromPose(); referenceImage = await loadImage('/reference/character-strip.png'); renderAll(); }
+void init();
+el<HTMLInputElement>('spriteId').addEventListener('change', () => void refreshAtlasSources());
+
+async function exportStandalonePack() {
+  const project = readProject();
+  const layers: Array<{ part: PartKey; atlas: string; frames: number; file: string }> = [];
+  const files: Array<{ name: string; data: string | Uint8Array }> = [];
+  for (const spec of profile().parts) {
+    const strip = await partStrip(spec.key);
+    if (!strip) {
+      if (spec.optional || spec.specialOnly || project.item.equipmentType === 'projectile') continue;
+      status.textContent = `Missing required ${spec.label} source.`;
+      return;
+    }
+    const file = `sprites/${spec.atlas.replace(/\.png$/i, '')}-strip.png`;
+    files.push({ name: file, data: dataUrlToBytes(canvasDataUrl(strip)) });
+    layers.push({ part: spec.key, atlas: spec.atlas, frames: spec.frames, file });
+  }
+  const manifest = { format: 'openspell-sprite-pack', version: 1, item: project.item, layers, note: 'These strips are standalone authoring outputs. A full appearance.carbon is optional and only needed for a merged native atlas export.' };
+  files.push({ name: 'itemdefs.carbon', data: JSON.stringify([itemDefinition(project)], null, 2) });
+  files.push({ name: 'manifest.json', data: JSON.stringify(manifest, null, 2) });
+  files.push({ name: 'README.txt', data: 'Standalone OpenSpell sprite pack\n\nThe sprites/ directory contains the authored 5- or 15-frame layer strips. Import appearance.carbon only when you want the studio to repack a complete native atlas.\n' });
+  downloadBlob(buildZip(files), `${slugify(project.item.name)}-sprite-pack.zip`);
+  status.textContent = 'Standalone sprite pack exported; no carbon bundle was required.';
+}
+
+async function exportPackage() { if (importedAppearance) await exportNative(); else await exportStandalonePack(); }
+
+// Keep the primary workflow independent of carbon files. The legacy listeners above are
+// intercepted here so the two export buttons always choose the appropriate pack format.
+for (const id of ['exportNative', 'exportNative2']) {
+  el<HTMLButtonElement>(id).addEventListener('click', event => { event.stopImmediatePropagation(); void exportPackage(); }, true);
+  el<HTMLButtonElement>(id).textContent = 'Export sprite pack';
+}
+el<HTMLButtonElement>('autoGenerate').addEventListener('click', event => {
+  event.stopImmediatePropagation();
+  const button = el<HTMLButtonElement>('autoGenerate');
+  applyAutoRig(true);
+  button.textContent = 'Rigid poses generated ✓';
+  window.setTimeout(() => { button.textContent = 'Generate rigid poses'; }, 1400);
+}, true);
+function syncPlacementVisibility() {
+  document.querySelector<HTMLElement>('.rig-panel')?.classList.toggle('strip-mode', equipmentType.value !== 'weapon');
+}
+equipmentType.addEventListener('change', syncPlacementVisibility);
+syncPlacementVisibility();
+function syncProfileCopy() {
+  const current = PROFILES[equipmentType.value as EquipmentType] ?? PROFILES.weapon;
+  const layers = current.parts.map(part => part.label).join(' + ');
+  const pairing = current.logicalSheet === 'shield1' || current.logicalSheet === 'back1' ? ' · paired layers' : '';
+  el<HTMLSpanElement>('profileLabel').textContent = `${current.label} · ${current.frames} frames${pairing}`;
+  el<HTMLSpanElement>('status').title = `${current.frames} frames · ${layers}`;
+  el<HTMLElement>('sourceHint').textContent = current.parts.length
+    ? current.parts.length > 1 && current.logicalSheet === 'shield1'
+      ? 'Shield uses two client layers. Upload both Shield back and Shield front; the atlas cells wrap across rows and are composited together per pose.'
+      : `${current.label}: use a ${current.frames === 5 ? '320×128' : '960×128'} directional strip, or a single rigid PNG for a quick prototype. Full atlases are cropped by Sprite ID.`
+    : 'Projectile equipment has no appearance atlas; export its metadata only.';
+}
+equipmentType.addEventListener('change', syncProfileCopy);
+syncProfileCopy();
+if (!Object.keys(sourceParts).length) status.textContent = 'OpenSpell profile ready · choose a layer and upload artwork';
+const projectFolder = document.createElement('input');
+projectFolder.id = 'projectFolder';
+projectFolder.type = 'file';
+projectFolder.multiple = true;
+projectFolder.setAttribute('webkitdirectory', '');
+projectFolder.hidden = true;
+document.body.appendChild(projectFolder);
+projectFolder.addEventListener('change', () => void loadProjectAssetFiles(Array.from(projectFolder.files ?? [])));
+el<HTMLButtonElement>('importProject').addEventListener('click', event => {
+  event.stopImmediatePropagation();
+  void openOpenSpellProject();
+}, true);
+const appearanceLabel = el<HTMLInputElement>('appearanceFile').parentElement;
+if (appearanceLabel?.firstChild) appearanceLabel.firstChild.textContent = 'Open asset data (optional)';
+el<HTMLSelectElement>('sourceMode').querySelector<HTMLOptionElement>('option[value="strip"]')!.textContent = 'Finished directional strip';
+el<HTMLSelectElement>('templateSelect').querySelector<HTMLOptionElement>('option[value=""]')!.textContent = 'Optional existing item';
+el<HTMLButtonElement>('loadTemplate').textContent = 'Use item';
+const metadataSummaries = document.querySelectorAll<HTMLElement>('.metadata summary');
+if (metadataSummaries[0]) metadataSummaries[0].textContent = 'Item settings';
+if (metadataSummaries[1]) metadataSummaries[1].textContent = 'Project data (optional)';
+const projectDetails = document.querySelectorAll<HTMLElement>('details.metadata')[1];
+const sourceActions = document.querySelectorAll<HTMLElement>('.source-actions');
+if (projectDetails) {
+  const summary = projectDetails.querySelector('summary');
+  if (summary && sourceActions[2]) summary.after(sourceActions[2]);
+  const appearanceControl = el<HTMLInputElement>('appearanceFile').parentElement;
+  if (sourceActions[1] && appearanceControl) {
+    sourceActions[1].removeChild(appearanceControl);
+    if (sourceActions[0]) sourceActions[0].after(sourceActions[1]);
+    projectDetails.appendChild(appearanceControl);
+  }
+}
+const exportNote = document.querySelector<HTMLElement>('.exportbar > span');
+if (exportNote) exportNote.textContent = 'Standalone sprite pack by default; optional native merge when appearance.carbon is loaded.';
+const brandTitle = document.querySelector<HTMLElement>('.brand strong');
+const brandSubtitle = document.querySelector<HTMLElement>('.brand span');
+const panelTitles = document.querySelectorAll<HTMLElement>('.panel-title strong');
+if (brandTitle) brandTitle.textContent = 'OpenSpell equipment workspace';
+if (brandSubtitle) brandSubtitle.textContent = 'profiles, layers and client-ready strips';
+if (panelTitles[0]) panelTitles[0].textContent = '1. Item layers';
+if (panelTitles[1]) panelTitles[1].textContent = '2. Client compositor';
+if (panelTitles[2]) panelTitles[2].textContent = '3. Placement';
+el<HTMLButtonElement>('importProject').textContent = 'Open project';
+el<HTMLButtonElement>('exportNative').textContent = 'Export item patch';
+el<HTMLButtonElement>('exportNative2').textContent = 'Export item patch';
+el<HTMLButtonElement>('exportItemDef').textContent = 'Item definition';
+el<HTMLButtonElement>('exportProject').textContent = 'Save project';
+el<HTMLButtonElement>('exportStrip').textContent = 'Export layer';

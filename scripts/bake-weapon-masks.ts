@@ -1,0 +1,13 @@
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { buildWeaponCutouts } from '../src/occlusion';
+(globalThis as any).document = { createElement: () => createCanvas(1,1) };
+const entries = JSON.parse(await readFile('public/game/appearance.carbon','utf8'));
+const defs = JSON.parse(await readFile('public/game/itemdefs.carbon','utf8'));
+const images: Map<string, any> = new Map(await Promise.all(entries.map(async (e:any)=>[e.filename,await loadImage(e.data)])));
+const sword = defs.find((d:any)=>d._id===58);
+if (!sword || sword.equipmentSpriteSheet !== 'weapon1') throw new Error('Longsword reference changed; audit masks before regenerating.');
+const masks = buildWeaponCutouts(images,sword.equipmentSpriteId);
+await mkdir('public/reference',{recursive:true});
+for (const [key,image] of Object.entries(masks)) await writeFile(`public/reference/weapon-${key}-mask.png`,(image as any).toBuffer('image/png'));
+console.log('Baked hands and rear-body weapon masks from the pinned game assets.');
