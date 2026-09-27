@@ -128,7 +128,8 @@ export function renderPart(source: SourcePart, image: HTMLImageElement, frames: 
   }
   return result;
 }
-export const weaponPreset = (preset: string): WeaponPreset => preset in WEAPON_PRESETS ? preset as WeaponPreset : 'sword';
+// Drafts saved before the spear / halberd split used 'polearm', which is today's halberd.
+export const weaponPreset = (preset: string): WeaponPreset => preset === 'polearm' ? 'halberd' : preset in WEAPON_PRESETS ? preset as WeaponPreset : 'sword';
 // Weapons use poses measured from native art (scripts/bake-weapon-poses.ts) for an upright
 // side-view source gripped at its anchor. Defaults reproduce the measurement exactly.
 export function generatePoses(type: EquipmentType, settings: Rig): Pose[] {

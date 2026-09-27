@@ -1,6 +1,7 @@
-import { TYPES, PROFILES, activeParts, defaultRig, defaultPose, defaultIcon, type Project, type ItemDef, type Pose, type SourcePart, type IconSettings } from './model';
+import { TYPES, PROFILES, activeParts, defaultRig, defaultPose, defaultIcon, type Project, type ItemDef, type Pose, type SourcePart, type IconSettings, type Material, type PartKey } from './model';
 import { validateColorReplacements } from './palette';
 import { weaponPreset } from './artwork';
+import { validateCustomTiers } from './tiers';
 
 export function parseProject(text: string): Project {
   const raw = JSON.parse(text.replace(/^\uFEFF/, ''));
@@ -48,5 +49,18 @@ export function parseProject(text: string): Project {
   if (!['auto', 'image'].includes(icon.source) || typeof icon.recolour !== 'boolean' || (icon.dataUrl !== undefined && (typeof icon.dataUrl !== 'string' || !icon.dataUrl.startsWith('data:image/png;base64,')))) throw new Error('Invalid inventory icon settings.');
   for (const k of ['rotation', 'scale', 'x', 'y'] as const) if (!Number.isFinite(icon[k])) throw new Error(`Invalid icon setting: ${k}.`);
   if (icon.scale <= 0) throw new Error('Icon size must be positive.');
-  return { version: 3, definition, sourceParts, autoRig, replaceExisting: !!raw.replaceExisting, templateId: raw.templateId, icon };
+  if (icon.tierRule !== undefined) icon.tierRule = validateColorReplacements([icon.tierRule])[0];
+  const project: Project = { version: 3, definition, sourceParts, autoRig, replaceExisting: !!raw.replaceExisting, templateId: raw.templateId, icon };
+  if (raw.material !== undefined) {
+    const m = raw.material, colours: Material['colours'] = {};
+    if (!m || typeof m !== 'object' || (m.tier !== undefined && (typeof m.tier !== 'string' || m.tier.length > 64)) || !m.colours || typeof m.colours !== 'object') throw new Error('Invalid material tier.');
+    for (const [key, list] of Object.entries(m.colours)) {
+      if (!validKeys.has(key as PartKey)) continue;
+      if (!Array.isArray(list) || list.length > 256 || list.some(c => typeof c !== 'string' || !/^#[0-9a-f]{6}$/i.test(c))) throw new Error(`Invalid ${key} material colours.`);
+      colours[key as PartKey] = list.map(c => c.toLowerCase());
+    }
+    project.material = { ...(m.tier === undefined ? {} : { tier: m.tier }), colours };
+  }
+  if (raw.customTiers !== undefined) project.customTiers = validateCustomTiers(raw.customTiers);
+  return project;
 }

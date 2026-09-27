@@ -7,11 +7,12 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "tsx --test tests/renderer.test.ts tests/occlusion.test.ts tests/palette.test.ts tests/uploaded-cutout.test.ts tests/rotsprite.test.ts tests/weapon-poses.test.ts tests/icon.test.ts",
+    "test": "tsx --test tests/tiers.test.ts tests/renderer.test.ts tests/occlusion.test.ts tests/palette.test.ts tests/uploaded-cutout.test.ts tests/rotsprite.test.ts tests/weapon-poses.test.ts tests/icon.test.ts",
     "test:ui": "playwright test",
-    "sync:game": "node scripts/sync-openspell.mjs && npm run masks:build && npm run poses:build",
+    "sync:game": "node scripts/sync-openspell.mjs && npm run masks:build && npm run poses:build && npm run palettes:build",
     "masks:build": "tsx scripts/bake-weapon-masks.ts",
-    "poses:build": "tsx scripts/bake-weapon-poses.ts"
+    "poses:build": "tsx scripts/bake-weapon-poses.ts",
+    "palettes:build": "tsx scripts/bake-tier-palettes.ts"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^1.0.9",

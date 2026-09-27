@@ -1,4 +1,5 @@
 import type { ColorReplacement } from './palette';
+import type { CustomTier } from './tiers';
 export const W = 64, H = 128, POSES = 15;
 export const DIRECTIONS = ['Front', 'Front ¾', 'Side', 'Rear ¾', 'Rear'];
 export const TYPES = ['weapon', 'shield', 'helmet', 'chest', 'legs', 'gloves', 'boots', 'back', 'neck', 'projectile'] as const;
@@ -31,9 +32,13 @@ export const defaultRig = (): Rig => ({ preset: 'sword', baseRotation: 0, skewSt
 // Inventory icon: generated from the artwork ('auto') or a supplied 48×48 image, such as the
 // template's own icon. Rotation, size and offset adjust either; recolour applies the main
 // layer's colour replacements and tint to a supplied image.
-export type IconSettings = { source: 'auto' | 'image'; dataUrl?: string; fileName?: string; rotation: number; scale: number; x: number; y: number; recolour: boolean };
+export type IconSettings = { source: 'auto' | 'image'; dataUrl?: string; fileName?: string; rotation: number; scale: number; x: number; y: number; recolour: boolean; tierRule?: ColorReplacement };
 export const defaultIcon = (type: EquipmentType): IconSettings => ({ source: 'auto', rotation: type === 'weapon' ? 45 : 0, scale: 1, x: 0, y: 0, recolour: true });
-export type Project = { version: 3; definition: ItemDef; sourceParts: Partial<Record<PartKey, SourcePart>>; autoRig: Rig; replaceExisting: boolean; templateId?: number; icon?: IconSettings };
+// Material tier: which source colours are the item's material on each layer, and the tier
+// they are shown in. The applied colours live in each layer's tier-tagged replacement rule
+// (and the icon's tierRule), so exports never need the tier tables.
+export type Material = { tier?: string; colours: Partial<Record<PartKey, string[]>> };
+export type Project = { version: 3; definition: ItemDef; sourceParts: Partial<Record<PartKey, SourcePart>>; autoRig: Rig; replaceExisting: boolean; templateId?: number; icon?: IconSettings; material?: Material; customTiers?: CustomTier[] };
 // The client sizes the icon atlas from the number of definitions and finds an item's icon at
 // cell _id − 1, so new items must fill the lowest free ID to get a visible icon.
 export function lowestFreeId(defs: ItemDef[]): number {
