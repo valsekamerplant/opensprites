@@ -105,11 +105,6 @@ test('rigid narrow sprites render in every frame and cannot bleed into adjacent 
   const clipped = renderPart(s,img as any,15);
   assert.ok(clipped.getContext('2d')!.getImageData(64,0,896,128).data.every(v=>v===0));
 });
-test('generated weapon front profiles receive perspective skew for side-profile uploads', () => {
-  const poses = generatePoses('weapon', defaultRig());
-  assert.deepEqual(poses.slice(0, 3).map(p => p.skewX), [1.6, 2.4, 3.2]);
-  assert.equal(poses[3].skewX, 2.8);
-});
 test('legacy helmet strips require explicit directional selection; source settings survive v3', () => {
   const img = createCanvas(960,128), s = stripSource(img as any,'old helmet');
   assert.throws(()=>renderPart(s,img as any,5),/Choose the five directional/);

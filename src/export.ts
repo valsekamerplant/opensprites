@@ -1,6 +1,7 @@
 import { type CarbonEntry, copyAtlasWithSlot, loadImage, imageDataUrl, canvasDataUrl } from './carbon';
 import { PROFILES, activeParts, type ItemDef, type Project, type PartKey } from './model';
 import { canvas } from './artwork';
+import { ICON_ATLAS, OUTLINE_ATLAS, outlineIcon, writeIcon } from './icon';
 
 export function nextSpriteId(entries: CarbonEntry[], images: Map<string, HTMLImageElement>, defs: ItemDef[], type: keyof typeof PROFILES, trim = false): number {
   const p = PROFILES[type]; let next = 0;
@@ -47,4 +48,16 @@ export async function nativeBundle(project: Project, strips: Map<PartKey, HTMLCa
     entry.data = canvasDataUrl(updated);
   }
   return { entries, definition: def };
+}
+// Full icon bundle with the item's cell written into both atlases, sized for the merged
+// definition count as the client expects.
+export async function iconBundle(icon: HTMLCanvasElement, id: number, original: CarbonEntry[], images: Map<string, HTMLImageElement>, definitionCount: number) {
+  const entries = original.map(e => ({ ...e }));
+  for (const [name, art] of [[ICON_ATLAS, icon], [OUTLINE_ATLAS, outlineIcon(icon)]] as const) {
+    const entry = entries.find(e => e.filename === name);
+    if (!entry) throw new Error(`Connected icon bundle is missing ${name}.`);
+    const atlas = images.get(name) || await loadImage(imageDataUrl(entry));
+    entry.data = canvasDataUrl(writeIcon(atlas, art, id, definitionCount));
+  }
+  return entries;
 }

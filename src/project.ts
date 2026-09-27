@@ -1,5 +1,6 @@
-import { TYPES, PROFILES, activeParts, defaultRig, defaultPose, type Project, type ItemDef, type Pose, type SourcePart } from './model';
+import { TYPES, PROFILES, activeParts, defaultRig, defaultPose, defaultIcon, type Project, type ItemDef, type Pose, type SourcePart, type IconSettings } from './model';
 import { validateColorReplacements } from './palette';
+import { weaponPreset } from './artwork';
 
 export function parseProject(text: string): Project {
   const raw = JSON.parse(text.replace(/^\uFEFF/, ''));
@@ -36,9 +37,16 @@ export function parseProject(text: string): Project {
     }
     if (part.legacyFrames && (part.legacyFrames.length !== 5 || part.legacyFrames.some(x => !Number.isInteger(x) || x < 0 || x >= 15))) throw new Error('Invalid legacy directional frame selection.');
     if (part.cutout && (definition.equipmentType !== 'weapon' || !['none','hands','hands-body'].includes(part.cutout.mode) || typeof part.cutout.hands !== 'string' || typeof part.cutout.rear !== 'string' || !part.cutout.hands.startsWith('data:image/png;base64,') || !part.cutout.rear.startsWith('data:image/png;base64,'))) throw new Error('Invalid weapon cutout settings or embedded masks.');
+    if (part.rotationQuality !== undefined && !['rotsprite', 'nearest'].includes(part.rotationQuality)) throw new Error(`Invalid ${key} rotation quality.`);
     if (part.replacements !== undefined) part.replacements = validateColorReplacements(part.replacements);
+    if (part.tint !== undefined && !/^#[0-9a-f]{6}$/i.test(part.tint)) throw new Error(`Invalid ${key} tint.`);
   }
   const autoRig = { ...defaultRig(), ...raw.autoRig };
+  autoRig.preset = weaponPreset(autoRig.preset); // retired 'reference-held' becomes the sword measurement
   for (const k of ['baseRotation','skewStrength','sideCompression','xOffset','yOffset','scale']) if (!Number.isFinite(autoRig[k])) throw new Error(`Invalid generation setting: ${k}.`);
-  return { version: 3, definition, sourceParts, autoRig, replaceExisting: !!raw.replaceExisting, templateId: raw.templateId };
+  const icon: IconSettings = { ...defaultIcon(definition.equipmentType!), ...raw.icon };
+  if (!['auto', 'image'].includes(icon.source) || typeof icon.recolour !== 'boolean' || (icon.dataUrl !== undefined && (typeof icon.dataUrl !== 'string' || !icon.dataUrl.startsWith('data:image/png;base64,')))) throw new Error('Invalid inventory icon settings.');
+  for (const k of ['rotation', 'scale', 'x', 'y'] as const) if (!Number.isFinite(icon[k])) throw new Error(`Invalid icon setting: ${k}.`);
+  if (icon.scale <= 0) throw new Error('Icon size must be positive.');
+  return { version: 3, definition, sourceParts, autoRig, replaceExisting: !!raw.replaceExisting, templateId: raw.templateId, icon };
 }

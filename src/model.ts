@@ -25,11 +25,23 @@ export type ItemDef = { _id: number; name: string; equipmentType?: EquipmentType
 export type Pose = { x: number; y: number; rotation: number; skewX: number; skewY: number; scaleX: number; scaleY: number; flipX: boolean; visible: boolean; behindReference?: boolean };
 export const defaultPose = (): Pose => ({ x: 32, y: 64, rotation: 0, skewX: 0, skewY: 0, scaleX: 1, scaleY: 1, flipX: false, visible: true });
 export type WeaponCutout = { mode: 'none' | 'hands' | 'hands-body'; hands: string; rear: string };
-export type SourcePart = { fileName: string; dataUrl: string; mode: 'single' | 'strip'; anchor: { x: number; y: number }; poses?: Pose[]; atlasDataUrl?: string; tint?: string; replacements?: ColorReplacement[]; legacyFrames?: number[]; requiresDirections?: boolean; unbakedDataUrl?: string; bakedDataUrl?: string; cutout?: WeaponCutout };
+export type SourcePart = { fileName: string; dataUrl: string; mode: 'single' | 'strip'; anchor: { x: number; y: number }; poses?: Pose[]; atlasDataUrl?: string; tint?: string; replacements?: ColorReplacement[]; legacyFrames?: number[]; requiresDirections?: boolean; unbakedDataUrl?: string; bakedDataUrl?: string; cutout?: WeaponCutout; rotationQuality?: 'rotsprite' | 'nearest' };
 export type Rig = { preset: string; baseRotation: number; skewStrength: number; sideCompression: number; xOffset: number; yOffset: number; scale: number; autoOcclusion?: boolean };
-export const defaultRig = (): Rig => ({ preset: 'reference-held', baseRotation: 0, skewStrength: 8, sideCompression: 30, xOffset: 0, yOffset: 0, scale: 1 });
-export type Project = { version: 3; definition: ItemDef; sourceParts: Partial<Record<PartKey, SourcePart>>; autoRig: Rig; replaceExisting: boolean; templateId?: number; };
+export const defaultRig = (): Rig => ({ preset: 'sword', baseRotation: 0, skewStrength: 8, sideCompression: 30, xOffset: 0, yOffset: 0, scale: 1 });
+// Inventory icon: generated from the artwork ('auto') or a supplied 48×48 image, such as the
+// template's own icon. Rotation, size and offset adjust either; recolour applies the main
+// layer's colour replacements and tint to a supplied image.
+export type IconSettings = { source: 'auto' | 'image'; dataUrl?: string; fileName?: string; rotation: number; scale: number; x: number; y: number; recolour: boolean };
+export const defaultIcon = (type: EquipmentType): IconSettings => ({ source: 'auto', rotation: type === 'weapon' ? 45 : 0, scale: 1, x: 0, y: 0, recolour: true });
+export type Project = { version: 3; definition: ItemDef; sourceParts: Partial<Record<PartKey, SourcePart>>; autoRig: Rig; replaceExisting: boolean; templateId?: number; icon?: IconSettings };
+// The client sizes the icon atlas from the number of definitions and finds an item's icon at
+// cell _id − 1, so new items must fill the lowest free ID to get a visible icon.
+export function lowestFreeId(defs: ItemDef[]): number {
+  const used = new Set(defs.map(d => d._id));
+  let id = 1; while (used.has(id)) id++;
+  return id;
+}
 export const activeParts = (def: ItemDef) => PROFILES[def.equipmentType || 'weapon'].parts.filter(p => !p.special || def._id === 617);
 export function newDefinition(type: EquipmentType, defs: ItemDef[]): ItemDef {
-  return { _id: Math.max(999, ...defs.map(d => d._id)) + 1, name: `New ${PROFILES[type].label.toLowerCase()}`, description: '', equipmentType: type, equipmentSpriteSheet: PROFILES[type].sheet || null, equipmentSpriteId: type === 'projectile' ? null : 0, cost: 1, weight: type === 'projectile' ? 0 : 1, isTradeable: true, isStackable: type === 'projectile', isNamePlural: false, isForMission: false, isMembers: false, canIOU: false, inventoryActions: ['equip'], equippableEffects: [], equippableRequirements: [], weaponSpeed: type === 'weapon' ? 4 : undefined };
+  return { _id: lowestFreeId(defs), name: `New ${PROFILES[type].label.toLowerCase()}`, description: '', equipmentType: type, equipmentSpriteSheet: PROFILES[type].sheet || null, equipmentSpriteId: type === 'projectile' ? null : 0, cost: 1, weight: type === 'projectile' ? 0 : 1, isTradeable: true, isStackable: type === 'projectile', isNamePlural: false, isForMission: false, isMembers: false, canIOU: false, inventoryActions: ['equip'], equippableEffects: [], equippableRequirements: [], weaponSpeed: type === 'weapon' ? 4 : undefined };
 }

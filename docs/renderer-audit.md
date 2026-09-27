@@ -30,6 +30,14 @@ Every cell is **64 × 128**. An item occupies **5 or 15 consecutive cells**, wit
 
 `pants.png` is character clothing; it is not the leg-armour atlas. Sheet suffixes select already loaded bitmap arrays; assigning an invented `shield2` or `weapon2` does not install another atlas in the current client.
 
+## Inventory icons
+
+`items.png` and `items_outline.png` (`carbon/items.carbon`) are 20 columns of 48 × 48 cells. `getCSSBackgroundPositionForItem` and the ground-item sprite both use cell **`_id − 1`**; cell 0 is also the IOU ticket. The CSS sizes the sheet to `ceil(item definition count / 20)` rows, so the PNG height must equal that, and an item ID beyond the last cell has no icon. The outline sheet is opaque white on transparent pixels that share an edge with the icon. Like appearance, `items.carbon` is overlaid wholesale.
+
+## Weapon grip styles
+
+`scripts/bake-weapon-poses.ts` stands each native weapon's upright side view (frame 6) about the hand and fits rotation, skew and scale to every other frame, ignoring pixels hidden by the hand or rear body. Metal tiers are recolours, so each family agrees exactly; widths use the median of each direction group. Fitted to an upright side-view upload, the presets match native frames at mean IoU 0.64–0.75, against 0.22–0.31 for the previous hand-tuned table. There is no native polearm: its preset combines the staff's placement with the axe's foreshortening.
+
 ## Exact composition order
 
 The order is fixed. Most directional visibility is already encoded in transparent pixels / blank cells, including the shield's front and rear sheets.

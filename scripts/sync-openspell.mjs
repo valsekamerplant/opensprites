@@ -9,6 +9,7 @@ await mkdir('tests/fixtures', { recursive: true });
 const paths = {
   'appearance.carbon': 'apps/shared-assets/base/static/carbon/appearance.carbon',
   'itemdefs.carbon': 'apps/shared-assets/base/static/itemdefs.carbon',
+  'items.carbon': 'apps/shared-assets/base/static/carbon/items.carbon',
   'LICENSE': 'LICENSE',
 };
 const hashes = {};

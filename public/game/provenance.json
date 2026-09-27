@@ -4,6 +4,7 @@
   "hashes": {
     "appearance.carbon": "30b590bf571663883d8cf8888d5f49577a7fec68b78cd47cce3f45f4046eb00c",
     "itemdefs.carbon": "18af18936d0bf1ff66bb40d10e57f73ce17a9f2d367fdefbe45ab64c67a8ae5d",
-    "LICENSE": "b8a035826cb9ae279d4d3319075d1b54e76ebbc571e63af7552cba6730af8445"
+    "LICENSE": "b8a035826cb9ae279d4d3319075d1b54e76ebbc571e63af7552cba6730af8445",
+    "items.carbon": "f3801f0d33a6228e9ed403c1c562cc06acb07f2ed89a1dfd63d31ab2c81d140a"
   }
 }
