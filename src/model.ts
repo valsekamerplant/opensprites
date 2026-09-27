@@ -34,10 +34,10 @@ export const defaultRig = (): Rig => ({ preset: 'sword', baseRotation: 0, skewSt
 // layer's colour replacements and tint to a supplied image.
 export type IconSettings = { source: 'auto' | 'image'; dataUrl?: string; fileName?: string; rotation: number; scale: number; x: number; y: number; recolour: boolean; tierRule?: ColorReplacement };
 export const defaultIcon = (type: EquipmentType): IconSettings => ({ source: 'auto', rotation: type === 'weapon' ? 45 : 0, scale: 1, x: 0, y: 0, recolour: true });
-// Material tier: which source colours are the item's material on each layer, and the tier
-// they are shown in. The applied colours live in each layer's tier-tagged replacement rule
+// Material tier: which source colours are the item's material on each layer, the native
+// tier the source art already is (if any), and the tier it is shown in. The applied colours live in each layer's tier-tagged replacement rule
 // (and the icon's tierRule), so exports never need the tier tables.
-export type Material = { tier?: string; colours: Partial<Record<PartKey, string[]>> };
+export type Material = { from?: string; tier?: string; colours: Partial<Record<PartKey, string[]>> };
 export type Project = { version: 3; definition: ItemDef; sourceParts: Partial<Record<PartKey, SourcePart>>; autoRig: Rig; replaceExisting: boolean; templateId?: number; icon?: IconSettings; material?: Material; customTiers?: CustomTier[] };
 // The client sizes the icon atlas from the number of definitions and finds an item's icon at
 // cell _id − 1, so new items must fill the lowest free ID to get a visible icon.

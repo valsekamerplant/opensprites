@@ -53,13 +53,13 @@ export function parseProject(text: string): Project {
   const project: Project = { version: 3, definition, sourceParts, autoRig, replaceExisting: !!raw.replaceExisting, templateId: raw.templateId, icon };
   if (raw.material !== undefined) {
     const m = raw.material, colours: Material['colours'] = {};
-    if (!m || typeof m !== 'object' || (m.tier !== undefined && (typeof m.tier !== 'string' || m.tier.length > 64)) || !m.colours || typeof m.colours !== 'object') throw new Error('Invalid material tier.');
+    if (!m || typeof m !== 'object' || [m.tier, m.from].some(t => t !== undefined && (typeof t !== 'string' || t.length > 64)) || !m.colours || typeof m.colours !== 'object') throw new Error('Invalid material tier.');
     for (const [key, list] of Object.entries(m.colours)) {
       if (!validKeys.has(key as PartKey)) continue;
       if (!Array.isArray(list) || list.length > 256 || list.some(c => typeof c !== 'string' || !/^#[0-9a-f]{6}$/i.test(c))) throw new Error(`Invalid ${key} material colours.`);
       colours[key as PartKey] = list.map(c => c.toLowerCase());
     }
-    project.material = { ...(m.tier === undefined ? {} : { tier: m.tier }), colours };
+    project.material = { ...(m.from === undefined ? {} : { from: m.from }), ...(m.tier === undefined ? {} : { tier: m.tier }), colours };
   }
   if (raw.customTiers !== undefined) project.customTiers = validateCustomTiers(raw.customTiers);
   return project;

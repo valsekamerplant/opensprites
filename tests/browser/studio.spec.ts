@@ -16,6 +16,7 @@ test('new uploads automatically cut hands and rear body in exported pixels, togg
   const original=uploaded.toBuffer('image/png');
   await page.locator('#pngFile').setInputFiles({name:'uploaded-weapon.png',mimeType:'image/png',buffer:original});
   await page.locator('#generate').click();await expect(page.locator('#cutoutMode')).toHaveValue('hands-body');
+  await page.locator('#advancedArtwork summary').click(); // cutouts live under Advanced
   const saveLayer=async()=>{const event=page.waitForEvent('download');await page.locator('#layerExport').click();return readFile((await (await event).path())!);};
   const pixels=async(buffer:Buffer)=>{const img=await loadImage(buffer),c=createCanvas(img.width,img.height);c.getContext('2d').drawImage(img,0,0);return c.getContext('2d').getImageData(0,0,c.width,c.height).data;};
   const alpha=(data:Uint8ClampedArray,x:number,y:number)=>data[(y*960+x)*4+3];
