@@ -11,7 +11,7 @@ export const exportMarkup = `
   <ul id="exportChecks" class="checks-list"></ul>
   <button id="pack" class="export-choice"><strong>Sprite pack</strong><span>PNG layers, icon and item definition. No game files needed.</span></button>
   <button id="native" class="export-choice"><strong>OpenSpell patch</strong><span>Full appearance and icon bundles plus the item definition, allocated against your current library.</span></button>
-  <p class="muted">Both include your editable draft. Exporting several new items? Connect the updated library before the next one so their IDs and sprites don’t collide.</p>
+  <p class="muted">Both include your editable draft. Exporting several new items? Connect (or reconnect) the updated library before the next one so their IDs and sprites don’t collide.</p>
   <button id="closeExport">Cancel</button>
 </dialog>`;
 
@@ -30,6 +30,10 @@ export function exportChecks(): Check[] {
     const fits = iconFits(d._id, count);
     checks.push({ ok: !!state.iconArt && fits, text: !state.iconArt ? 'No inventory icon yet (needed for a patch)' : fits ? 'Inventory icon ready' : `Item ID ${d._id} has no icon cell; use ${lowestFreeId(library.defs)}`, blocking: !state.project.replaceExisting && !!state.iconArt && !fits });
   }
+  const r = library.report;
+  checks.push(library.source === 'bundled'
+    ? { ok: false, text: 'OpenSpell patch uses the bundled game library: your custom items aren’t included. Connect your OpenSpell folder first (Project library).' }
+    : { ok: true, text: `Library: ${library.label}${r ? ` (${r.customItems} custom item${r.customItems === 1 ? '' : 's'})` : ''}` });
   return checks;
 }
 export const blockingIssues = () => exportChecks().filter(c => !c.ok && c.blocking).length;

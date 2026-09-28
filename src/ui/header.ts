@@ -10,6 +10,7 @@ export const headerMarkup = `
   <input id="name" aria-label="Item name" placeholder="Item name">
   <select id="type" aria-label="Equipment type"></select>
   <div class="header-actions">
+    <button id="libraryChip" class="chip" title="Which game library exports are built against. Click to connect your OpenSpell folder.">Library: bundled</button>
     <button id="new" title="Start a blank item of this type">New item</button>
     <button id="open" title="Open a saved draft (.json)">Open draft</button>
     <button id="save" title="Download an editable draft with its source images">Save draft</button>
@@ -36,6 +37,7 @@ export function mountHeader() {
   $('open').onclick = () => input('projectFile').click();
   input('projectFile').onchange = () => task(async () => { const f = input('projectFile').files?.[0]; input('projectFile').value = ''; if (f) await openDraft(await f.text()); });
   $('save').onclick = saveDraft;
+  $('libraryChip').onclick = () => { const panel = $<HTMLDetailsElement>('connection'); panel.open = true; panel.scrollIntoView({ block: 'nearest' }); $('folderButton').focus(); };
   $('type').onchange = () => task(() => changeType(select('type').value as EquipmentType));
   $('name').onchange = () => { snapshot(); state.project.definition.name = input('name').value; badge(); status(`Renamed to “${state.project.definition.name}”.`); };
 }

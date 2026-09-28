@@ -41,7 +41,9 @@ Save an editable draft at any time. Export offers two explicit choices:
 - **Sprite pack:** PNG layers, icon and outline, mapping manifest, proposed item definition and editable project. No game bundle needed.
 - **OpenSpell patch:** complete updated appearance and icon bundles and changed item definition, allocated against the current library. Connect your project folder first when it has custom artwork, or re-import the previous patch before adding more items.
 
-The optional **Project library** panel accepts an OpenSpell checkout or individual asset files. Base/custom precedence matches the game. It reads files without modifying your checkout.
+The **Project library** panel connects your OpenSpell checkout, so exports know your custom items and allocate IDs and sprites after them. Pick the checkout itself, `apps`, or `apps/shared-assets`; copies inside `node_modules`, `build`, `dist` and hidden folders are ignored. You can also load individual asset files. Base/custom precedence matches the game, and the studio never modifies your checkout.
+
+The panel and the header's **Library** chip show what is connected, with game and custom item counts. When a connected library already uses your new item's ID, the item moves to the next free one. In Chrome and Edge the folder is remembered: on your next visit, **Reconnect \<folder\>** reloads it with one click. The export dialog warns when a patch would be built against the bundled game library instead of yours.
 
 Native patch installation:
 
@@ -53,6 +55,10 @@ Native patch installation:
 The appearance and icon files replace their whole bundles. Exporting separate patches against the same old library does not combine their new items; connect the updated assets before the next addition. Deployment is a separate task.
 
 See the [renderer audit and 3D follow-up proposal](docs/renderer-audit.md) for exact draw order, shield/cape behaviour, hardcoded equipment exceptions and automation limits. No 3D model importer is included yet.
+
+## Hosting
+
+`npm run build` writes a static site to `dist/` with relative URLs, so it works from any folder, for example `https://example.com/opensprites/`. Upload the whole `dist/` folder, including `game/` and `reference/`.
 
 ## Development
 

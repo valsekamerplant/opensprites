@@ -66,6 +66,12 @@ header { min-height: 64px; display: flex; gap: 8px; align-items: center; padding
 header #name { max-width: 260px; }
 header #type { max-width: 165px; }
 .header-actions { display: flex; gap: 6px; margin-left: auto; }
+.chip { font-size: 11px; padding: 6px 9px; color: var(--muted); border-style: dashed; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.chip.connected { color: var(--good); border-style: solid; }
+.badge.connected { color: var(--good); }
+#libraryError { font-size: 11px; white-space: normal; }
+#libraryReport { font-size: 10px; }
+code { font-family: ui-monospace, Consolas, monospace; font-size: 10px; color: var(--text-2); }
 .count-badge { display: inline-block; min-width: 16px; margin-left: 6px; padding: 0 4px; border-radius: 8px; background: #6b2f22; color: #ffd7cb; font-size: 10px; line-height: 16px; text-align: center; }
 
 /* Three columns: library, stage, inspector */

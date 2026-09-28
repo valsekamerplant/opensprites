@@ -3,6 +3,7 @@ import { canvas, extractStrip, generatePoses, shieldPoses, stripSource } from '.
 import { loadImage, canvasDataUrl } from '../carbon';
 import { parseProject } from '../project';
 import { validateCutoutImage } from '../occlusion';
+import { assetUrl } from '../library';
 import { download } from './dom';
 import { state, library, drafts, cutoutImages, masks, fresh, type, profile, source, snapshot, status, emit, type Panel } from './state';
 import { rebuild, gameIcon } from './render';
@@ -114,7 +115,7 @@ export function generate() {
 // The small bundled hand / rear-body masks load independently of the game bundles.
 // Drafts embed their masks, so reopening one does not need them.
 export const maskReady = (async () => {
-  const [hands, rear] = await Promise.all(['hands', 'rear'].map(name => loadImage(`/reference/weapon-${name}-mask.png`)));
+  const [hands, rear] = await Promise.all(['hands', 'rear'].map(name => loadImage(assetUrl(`reference/weapon-${name}-mask.png`))));
   const encode = (image: HTMLImageElement) => { validateCutoutImage(image); const c = canvas(960); c.getContext('2d')!.drawImage(image, 0, 0); const url = canvasDataUrl(c); cutoutImages.set(url, image); return url; };
   masks.defaultCutout = { mode: 'hands-body', hands: encode(hands), rear: encode(rear) };
 })();
