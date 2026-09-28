@@ -141,3 +141,27 @@ test('invalid imports fail; standard project overlays replace appearance and mer
   ],{entries:[],defs:[]});
   assert.deepEqual(result.defs,[{_id:1,name:'Changed'},{_id:2,name:'B'}]); assert.equal(result.entries[0].filename,'b.png'); assert.equal(result.entries.length,1);
 });
+test('project folders connect from any level of the checkout and ignore copies', async () => {
+  const file=(path:string,value:any)=>({name:path.split('/').at(-1)!,webkitRelativePath:path,text:async()=>JSON.stringify(value)});
+  const layout=(root:string)=>[
+    file(`${root}base/static/itemdefs.carbon`,[{_id:1,name:'A'},{_id:2,name:'B'}]),
+    file(`${root}custom/static/itemdefs.carbon`,[{_id:1,name:'Changed'},{_id:700,name:'Custom spear'}]),
+    file(`${root}base/static/carbon/appearance.carbon`,[{filename:'a.png',data:'base'}]),
+  ];
+  for (const root of ['openspell/apps/shared-assets/','apps/shared-assets/','shared-assets/','my-assets/']) {
+    const {defs,report}=await readProjectFiles(layout(root),{entries:[],defs:[]});
+    assert.deepEqual(defs.map(d=>d.name),['Changed','B','Custom spear'],root);
+    assert.equal(report.customItems,1,root); assert.equal(report.baseItems,2,root);
+    assert.deepEqual(report.used.map(u=>u.layer),['base','base','custom'],root);
+  }
+  // Dependency and build copies are skipped instead of failing the connection.
+  const copies=[...layout('repo/apps/shared-assets/'),...layout('repo/node_modules/openspell/apps/shared-assets/'),...layout('repo/apps/web/build/shared-assets/'),file('repo/.git/x/itemdefs.carbon',[])];
+  const {defs,report}=await readProjectFiles(copies,{entries:[],defs:[]});
+  assert.equal(defs.length,3); assert.ok(report.used.every(u=>u.path.startsWith('repo/apps/shared-assets/')));
+  assert.equal(report.skipped.length,7); assert.ok(report.skipped.some(s=>s.reason.startsWith('inside an ignored')));
+  // Only a custom folder: its definitions add to the current library.
+  const custom=await readProjectFiles([file('custom/static/itemdefs.carbon',[{_id:900,name:'X'}])],{entries:[],defs:[{_id:1,name:'A'}]});
+  assert.deepEqual(custom.defs.map(d=>d._id),[1,900]); assert.equal(custom.report.customItems,1);
+  await assert.rejects(readProjectFiles([file('a/itemdefs.carbon',[]),file('b/itemdefs.carbon',[])],{entries:[],defs:[]}),/2 copies of itemdefs.carbon outside the OpenSpell layout/);
+  await assert.rejects(readProjectFiles([file('repo/node_modules/itemdefs.carbon',[])],{entries:[],defs:[]}),/outside ignored folders/);
+});

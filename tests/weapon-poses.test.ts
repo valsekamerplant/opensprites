@@ -48,7 +48,7 @@ test('measured presets reproduce native weapons of each family', () => {
   for (const [preset, sprite] of [['sword', 4], ['axe', 9], ['pickaxe', 10], ['bow', 24], ['staff', 27]] as const) {
     const score = nativeMatch(preset, sprite);
     assert.ok(score > .6, `${preset} matches native frames at mean IoU ${score.toFixed(2)}`);
-    for (const other of Object.keys(WEAPON_PRESETS).filter(k => k !== preset && k !== 'polearm'))
+    for (const other of Object.keys(WEAPON_PRESETS).filter(k => k !== preset && !['spear', 'halberd'].includes(k)))
       assert.ok(nativeMatch(other, sprite) < score, `${preset} sprite fits its own preset better than ${other}`);
   }
 });
@@ -61,8 +61,20 @@ test('presets cover all 15 frames; rig settings still adjust them', () => {
   assert.ok(flat.every(p => p.scaleX === 1 && p.skewX === 0));
 });
 
-test('old drafts using the retired hand-tuned preset load as the sword measurement', () => {
+test('old drafts load retired presets: hand-tuned as sword, polearm as halberd', () => {
   const draft = (preset: string) => JSON.stringify({ version: 3, definition: { _id: 5000, name: 'x', equipmentType: 'weapon', equipmentSpriteSheet: 'weapon1' }, sourceParts: {}, autoRig: { preset } });
   assert.equal(parseProject(draft('reference-held')).autoRig.preset, 'sword');
-  assert.equal(parseProject(draft('polearm')).autoRig.preset, 'polearm');
+  assert.equal(parseProject(draft('polearm')).autoRig.preset, 'halberd');
+  assert.equal(parseProject(draft('spear')).autoRig.preset, 'spear');
+});
+
+test('spear and halberd derive from the staff grip', () => {
+  const { staff, axe, spear, halberd } = WEAPON_PRESETS;
+  for (let p = 0; p < 15; p++) {
+    assert.deepEqual([halberd.frames[p][0], halberd.frames[p][1], halberd.frames[p][2], halberd.frames[p][4]], [staff.frames[p][0], staff.frames[p][1], staff.frames[p][2], axe.frames[p][4]]);
+    assert.deepEqual([spear.frames[p][0], spear.frames[p][1], spear.frames[p][4]], [staff.frames[p][0], staff.frames[p][1], staff.frames[p][4]]);
+    // The point leans toward the facing direction only in ¾ and side views.
+    const lean = spear.frames[p][2] - staff.frames[p][2], view = Math.floor(p / 3);
+    assert.ok(view === 0 || view === 4 ? Math.abs(lean) < 1e-9 : lean > 0, `frame ${p} lean ${lean}`);
+  }
 });
