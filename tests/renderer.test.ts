@@ -94,7 +94,7 @@ test('native export allocates paired IDs beyond artwork and references; trims al
     assert.equal(Buffer.compare(pixels(preserved),pixels(old)),0);
   }
   for(const e of original.filter(e=>!PROFILES.shield.parts.some(p=>p.atlas===e.filename))) assert.equal(result.entries.find(x=>x.filename===e.filename)!.data,e.data);
-  assert.ok(nextSpriteId(entries,images,defs,'shield')>d.equipmentSpriteId!);
+  assert.ok(nextSpriteId(images,defs,'shield')>d.equipmentSpriteId!);
 });
 test('rigid narrow sprites render in every frame and cannot bleed into adjacent frames', () => {
   const img = createCanvas(13,92); img.getContext('2d').fillStyle='#ff0044'; img.getContext('2d').fillRect(0,0,13,92);
@@ -164,4 +164,12 @@ test('project folders connect from any level of the checkout and ignore copies',
   assert.deepEqual(custom.defs.map(d=>d._id),[1,900]); assert.equal(custom.report.customItems,1);
   await assert.rejects(readProjectFiles([file('a/itemdefs.carbon',[]),file('b/itemdefs.carbon',[])],{entries:[],defs:[]}),/2 copies of itemdefs.carbon outside the OpenSpell layout/);
   await assert.rejects(readProjectFiles([file('repo/node_modules/itemdefs.carbon',[])],{entries:[],defs:[]}),/outside ignored folders/);
+});
+test('new sprites fill the blank right half of a sheet row instead of skipping it', () => {
+  // weapon1 is 30 cells wide: two 15-frame sprites per row. Sprites 0–2 are painted, 3 is blank.
+  const atlas = createCanvas(1920,256), ctx = atlas.getContext('2d'); ctx.fillStyle='#f00';
+  for (const id of [0,1,2]) ctx.fillRect((id%2)*960+14*64+30,Math.floor(id/2)*128+60,2,2);
+  assert.equal(nextSpriteId(new Map([['weapon1.png',atlas as any]]),[],'weapon'),3);
+  assert.equal(nextSpriteId(new Map([['weapon1.png',atlas as any]]),[{_id:1,name:'x',equipmentSpriteSheet:'weapon1',equipmentSpriteId:5}],'weapon'),6);
+  assert.equal(nextSpriteId(new Map([['weapon1.png',createCanvas(1920,256) as any]]),[],'weapon'),0);
 });

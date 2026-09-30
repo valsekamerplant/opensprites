@@ -11,10 +11,10 @@ import { state, library, type, profile, source, snapshot, status, emit, cutoutIm
 /** The definition as it will be exported: new items get the next free sprite (and trim) slots. */
 export function effectiveDefinition(): ItemDef {
   const def = { ...state.project.definition };
-  if (!state.project.replaceExisting && type() !== 'projectile') def.equipmentSpriteId = nextSpriteId(library.entries, library.images, library.defs, type());
+  if (!state.project.replaceExisting && type() !== 'projectile') def.equipmentSpriteId = nextSpriteId(library.images, library.defs, type());
   def.equipmentSpriteSheet = profile().sheet;
   if (activeParts(def).some(p => p.trim && state.strips.has(p.key))) {
-    if (!state.project.replaceExisting || def.equipmentTrimSpriteId == null || def.equipmentTrimSpriteId < 0) def.equipmentTrimSpriteId = nextSpriteId(library.entries, library.images, library.defs, type(), true);
+    if (!state.project.replaceExisting || def.equipmentTrimSpriteId == null || def.equipmentTrimSpriteId < 0) def.equipmentTrimSpriteId = nextSpriteId(library.images, library.defs, type(), true);
     def.equipmentTrimSpriteSheet = profile().sheet.replace('1', 'trim1');
   } else { def.equipmentTrimSpriteId = null; def.equipmentTrimSpriteSheet = null; }
   return def;

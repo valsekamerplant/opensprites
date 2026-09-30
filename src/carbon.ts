@@ -58,7 +58,7 @@ export function cropStrip(image: HTMLImageElement, frames: number, frameIndex: n
 
 export function copyAtlasWithSlot(
   image: HTMLImageElement,
-  strip: HTMLImageElement,
+  strip: HTMLImageElement | HTMLCanvasElement,
   frames: number,
   spriteId: number,
 ): HTMLCanvasElement {

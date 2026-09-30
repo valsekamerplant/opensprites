@@ -1,7 +1,8 @@
 import { activeParts, lowestFreeId } from '../model';
 import { ICON_COLUMNS, iconFits, iconRows, outlineIcon } from '../icon';
-import { buildZip, canvasDataUrl, dataUrlToBytes } from '../carbon';
-import { nativeBundle, validateExport, iconBundle } from '../export';
+import { buildZip, canvasDataUrl, copyAtlasWithSlot, dataUrlToBytes } from '../carbon';
+import { canvas } from '../artwork';
+import { nativeBundle, validateExport, iconBundle, planSprites } from '../export';
 import { $, h, download } from './dom';
 import { state, library, profile, type, status, task, on } from './state';
 import { effectiveDefinition, iconDefinitionCount } from './render';
@@ -9,6 +10,7 @@ import { effectiveDefinition, iconDefinitionCount } from './render';
 export const exportMarkup = `
 <dialog id="exportDialog" aria-labelledby="exportTitle"><h2 id="exportTitle">Export your item</h2>
   <ul id="exportChecks" class="checks-list"></ul>
+  <div id="exportSheets" class="sheet-previews"></div>
   <button id="pack" class="export-choice"><strong>Sprite pack</strong><span>PNG layers, icon and item definition. No game files needed.</span></button>
   <button id="native" class="export-choice"><strong>OpenSpell patch</strong><span>Full appearance and icon bundles plus the item definition, allocated against your current library.</span></button>
   <p class="muted">Both include your editable draft. Exporting several new items? Connect (or reconnect) the updated library before the next one so their IDs and sprites don’t collide.</p>
@@ -64,7 +66,24 @@ async function exportFiles(native: boolean) {
   status(native ? `Exported full appearance patch. Item ${def._id} → sprite ${def.equipmentSpriteId}.` : 'Exported sprite pack and editable draft.');
 }
 
+/** The sheet rows the patch writes, with the new sprite drawn in and outlined, so its slot can be checked before export. */
+function sheetPreviews(): HTMLElement[] {
+  let plan; try { plan = planSprites(state.project, state.strips, library.images, library.defs); } catch (error) { return [h('p', { class: 'bad', text: error instanceof Error ? error.message : String(error) })]; }
+  if (!plan || !library.entries.length) return [];
+  const frames = profile().frames;
+  return plan.layers.flatMap(({ part, slot }) => {
+    const base = library.images.get(part.atlas); if (!base) return [];
+    const sheet = copyAtlasWithSlot(base, state.strips.get(part.key) || canvas(frames * 64), frames, slot);
+    const cols = Math.floor(sheet.width / 64), cell = slot * frames, row = Math.floor(cell / cols), first = Math.max(0, row - 2);
+    const view = canvas(sheet.width, (row - first + 1) * 128), ctx = view.getContext('2d')!;
+    ctx.drawImage(sheet, 0, first * 128, sheet.width, view.height, 0, 0, sheet.width, view.height);
+    ctx.strokeStyle = '#e3b15e'; ctx.lineWidth = 8; ctx.strokeRect((cell % cols) * 64 + 4, (row - first) * 128 + 4, frames * 64 - 8, 120);
+    const note = state.project.replaceExisting ? 'replaces the existing sprite' : sheet.height > base.height ? 'adds a row to the sheet' : 'fills a blank slot';
+    return [h('figure', {}, view, h('figcaption', { text: `${part.atlas} · sprite #${slot} (${note})` }))];
+  });
+}
 function checklist() {
+  $('exportSheets').replaceChildren(...sheetPreviews());
   $('exportChecks').replaceChildren(...exportChecks().map(c => h('li', { class: c.ok ? 'ok' : c.blocking ? 'bad' : 'warn' }, h('span', { text: c.ok ? '✓' : '!', 'aria-hidden': 'true' }), c.text)));
 }
 export function mountExport() {

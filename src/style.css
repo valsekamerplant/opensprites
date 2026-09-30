@@ -214,7 +214,7 @@ aside { padding: 14px 12px; overflow: auto; background: var(--panel); }
 footer { height: 34px; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 7px 13px; background: var(--panel-2); border-top: 1px solid var(--edge); font-size: 10px; color: #afb2b8; }
 #status { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #target { white-space: nowrap; color: #868b95; }
-dialog { background: var(--panel-2); color: var(--text); border: 1px solid #71757c; border-radius: 5px; padding: 24px; width: min(440px, calc(100vw - 32px)); box-shadow: 0 12px 50px #0009; }
+dialog { background: var(--panel-2); color: var(--text); border: 1px solid #71757c; border-radius: 5px; padding: 24px; width: min(560px, calc(100vw - 32px)); box-shadow: 0 12px 50px #0009; }
 dialog::backdrop { background: #0c0d10bb; }
 .checks-list { list-style: none; margin: 0 0 6px; padding: 0; }
 .checks-list li { display: flex; gap: 7px; padding: 3px 0; font-size: 11px; }
@@ -222,6 +222,10 @@ dialog::backdrop { background: #0c0d10bb; }
 .checks-list .ok span { color: var(--good); }
 .checks-list .bad { color: var(--bad); }
 .checks-list .warn span { color: var(--accent); }
+.sheet-previews figure { margin: 8px 0; }
+.sheet-previews canvas { display: block; width: 100%; height: auto; background: #d9d9d9; border-radius: 3px; }
+.sheet-previews figcaption { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.sheet-previews .bad { color: var(--bad); font-size: 11px; }
 .export-choice { display: block; width: 100%; text-align: left; padding: 15px; margin: 11px 0; white-space: normal; }
 .export-choice strong, .export-choice span { display: block; }
 .export-choice strong { color: var(--accent); margin-bottom: 5px; }
